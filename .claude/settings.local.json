@@ -1,0 +1,33 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(chmod +x *)",
+      "Bash(pip3 --version)",
+      "Bash(python3 *)",
+      "Bash(pip install *)",
+      "Bash(pip3 show *)",
+      "Bash(curl -s http://localhost:8000/auth/status)",
+      "Bash(python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000)",
+      "Bash(pip show *)",
+      "Bash(python *)",
+      "Bash(lsof -ti:8000)",
+      "Bash(curl -s -X POST http://localhost:8000/profile/videos -H \"Content-Type: application/json\" -d '{\"url\": \"https://www.tiktok.com/@thuhangbeauty\"}')",
+      "Bash(curl -s http://localhost:8000/)",
+      "Bash(curl -s http://localhost:8000/api/profile -X POST -H \"Content-Type: application/json\" -d '{\"url\":\"https://www.tiktok.com/@_xiangg__\"}')",
+      "Bash(curl -s http://localhost:8000/profile/videos -X POST -H \"Content-Type: application/json\" -d '{\"url\":\"https://www.tiktok.com/@_xiangg__\"}')",
+      "Bash(curl *)",
+      "Bash(journalctl --user -n 50)",
+      "Bash(uvicorn backend.main:app --host 0.0.0.0 --port 8000)",
+      "Bash(pkill -f \"uvicorn backend.main\")",
+      "Bash(fuser 8000/tcp)",
+      "Bash(echo \"Started PID: $!\")",
+      "Bash(fuser -k 8000/tcp)",
+      "Bash(echo \"PID=$!\")",
+      "Bash(sort -k6,7)",
+      "Bash(ffmpeg -version)",
+      "Bash(ffprobe -version)",
+      "Bash(ffprobe -v quiet -show_streams -of json /home/quannm1/Downloads/gym.mp4)",
+      "Bash(echo \"PID: $!\")"
+    ]
+  }
+}

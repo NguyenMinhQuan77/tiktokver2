@@ -1,0 +1,1298 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TikTok Affiliate Tool</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    :root {
+      --tt-black: #010101;
+      --tt-red:   #FE2C55;
+      --tt-cyan:  #25F4EE;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      background: #0a0a0a;
+      color: #f1f1f1;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      min-height: 100vh;
+    }
+
+    /* ── Login ─────────────────────────────── */
+    .login-bg {
+      background:
+        radial-gradient(ellipse at 20% 50%, rgba(254,44,85,.18) 0%, transparent 60%),
+        radial-gradient(ellipse at 80% 50%, rgba(37,244,238,.12) 0%, transparent 60%),
+        #0a0a0a;
+    }
+
+    /* ── Buttons ───────────────────────────── */
+    .btn-tiktok {
+      background: #111;
+      border: 1px solid #333;
+      color: #fff;
+      padding: 12px 28px;
+      border-radius: 8px;
+      font-weight: 600;
+      font-size: 15px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      transition: all .2s;
+      width: 100%;
+      justify-content: center;
+    }
+    .btn-tiktok:hover:not(:disabled) {
+      background: #1a1a1a;
+      border-color: #FE2C55;
+      box-shadow: 0 0 20px rgba(254,44,85,.25);
+    }
+    .btn-tiktok:disabled { opacity:.5; cursor:not-allowed; }
+
+    .btn-primary {
+      background: linear-gradient(135deg, #FE2C55, #c91f3e);
+      color: #fff;
+      padding: 11px 22px;
+      border-radius: 8px;
+      font-weight: 600;
+      font-size: 14px;
+      cursor: pointer;
+      border: none;
+      transition: all .2s;
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      white-space: nowrap;
+    }
+    .btn-primary:hover:not(:disabled) {
+      background: linear-gradient(135deg, #ff3d66, #e02245);
+      box-shadow: 0 4px 20px rgba(254,44,85,.4);
+      transform: translateY(-1px);
+    }
+    .btn-primary:disabled { opacity:.45; cursor:not-allowed; transform:none; }
+
+    .btn-sm {
+      padding: 6px 14px;
+      border-radius: 6px;
+      font-weight: 600;
+      font-size: 12px;
+      cursor: pointer;
+      border: none;
+      transition: all .2s;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .btn-cancel {
+      background: #2a1a1a;
+      color: #ff6b85;
+      border: 1px solid #5a2020;
+    }
+    .btn-cancel:hover { background:#3a1a1a; border-color:#FE2C55; }
+
+    /* ── Inputs ────────────────────────────── */
+    .input-field {
+      background: #1a1a1a;
+      border: 1px solid #2e2e2e;
+      color: #f1f1f1;
+      border-radius: 8px;
+      padding: 10px 14px;
+      font-size: 14px;
+      width: 100%;
+      outline: none;
+      transition: border-color .2s, box-shadow .2s;
+    }
+    .input-field:focus {
+      border-color: #FE2C55;
+      box-shadow: 0 0 0 2px rgba(254,44,85,.15);
+    }
+    .input-field::placeholder { color: #444; }
+
+    /* ── Cards ─────────────────────────────── */
+    .card {
+      background: #111;
+      border: 1px solid #1e1e1e;
+      border-radius: 12px;
+      padding: 22px;
+    }
+
+    /* ── Video card ─────────────────────────── */
+    .video-card {
+      background: #111;
+      border: 1px solid #222;
+      border-radius: 12px;
+      overflow: hidden;
+      cursor: pointer;
+      transition: border-color .2s, box-shadow .2s, transform .15s;
+      position: relative;
+    }
+    .video-card:hover {
+      border-color: #444;
+      transform: translateY(-2px);
+    }
+    .video-card.selected {
+      border-color: #FE2C55;
+      box-shadow: 0 0 0 2px rgba(254,44,85,.25);
+    }
+
+    .card-thumb {
+      position: relative;
+      aspect-ratio: 16/9;
+      background: #0d0d0d;
+      overflow: hidden;
+    }
+    .card-thumb img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+    .thumb-fallback {
+      width: 100%;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 32px;
+      background: #161616;
+    }
+    .duration-badge {
+      position: absolute;
+      bottom: 6px;
+      right: 6px;
+      background: rgba(0,0,0,.75);
+      color: #fff;
+      font-size: 11px;
+      font-weight: 600;
+      padding: 2px 7px;
+      border-radius: 4px;
+      backdrop-filter: blur(4px);
+    }
+    .checkbox-overlay {
+      position: absolute;
+      top: 8px;
+      left: 8px;
+      width: 22px;
+      height: 22px;
+      border-radius: 6px;
+      border: 2px solid rgba(255,255,255,.6);
+      background: rgba(0,0,0,.4);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all .15s;
+      z-index: 2;
+    }
+    .video-card.selected .checkbox-overlay {
+      background: #FE2C55;
+      border-color: #FE2C55;
+    }
+    .checkbox-overlay svg { display: none; }
+    .video-card.selected .checkbox-overlay svg { display: block; }
+
+    .card-body { padding: 12px; }
+    .card-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: #e8e8e8;
+      line-height: 1.4;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+      margin-bottom: 6px;
+    }
+    .card-caption {
+      font-size: 12px;
+      color: #666;
+      line-height: 1.4;
+      display: -webkit-box;
+      -webkit-line-clamp: 3;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+    .card-inputs { padding: 0 12px 12px; display: flex; flex-direction: column; gap: 8px; }
+    .card-input-label {
+      font-size: 11px;
+      font-weight: 600;
+      color: #888;
+      margin-bottom: 4px;
+      display: block;
+    }
+    .card-input {
+      background: #0d0d0d;
+      border: 1px solid #2a2a2a;
+      color: #f1f1f1;
+      border-radius: 6px;
+      padding: 8px 10px;
+      font-size: 12px;
+      width: 100%;
+      outline: none;
+      transition: border-color .2s;
+    }
+    .card-input:focus { border-color: #FE2C55; }
+    .card-input::placeholder { color: #3a3a3a; }
+    select.card-input { -webkit-appearance: none; appearance: none; cursor: pointer; }
+    select.card-input option { background: #111; color: #f1f1f1; }
+    .card-input-row { display: flex; gap: 8px; align-items: flex-end; }
+    .post-time-hint {
+      font-size: 11px;
+      color: #555;
+      margin-top: 4px;
+    }
+    .post-time-hint span { color: #25F4EE; }
+
+    /* ── Spinner ────────────────────────────── */
+    .spinner {
+      width: 18px; height: 18px;
+      border: 2px solid rgba(255,255,255,.25);
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: spin .7s linear infinite;
+      display: inline-block;
+      flex-shrink: 0;
+    }
+    .spinner-dark { border-color: rgba(0,0,0,.2); border-top-color: #010101; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── Pulse ─────────────────────────────── */
+    .pulse { animation: pulse-anim 1.5s ease-in-out infinite; }
+    @keyframes pulse-anim {
+      0%, 100% { opacity: 1; }
+      50%       { opacity: .4; }
+    }
+
+    /* ── Status badges ──────────────────────── */
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 12px;
+      font-weight: 600;
+      padding: 3px 10px;
+      border-radius: 20px;
+    }
+    .status-pending    { background: rgba(234,179,8,.15);  color: #fbbf24; border: 1px solid rgba(234,179,8,.3); }
+    .status-downloading{ background: rgba(59,130,246,.15); color: #60a5fa; border: 1px solid rgba(59,130,246,.3); }
+    .status-posting    { background: rgba(37,244,238,.1);  color: #25F4EE; border: 1px solid rgba(37,244,238,.3); }
+    .status-done       { background: rgba(34,197,94,.15);  color: #4ade80; border: 1px solid rgba(34,197,94,.3); }
+    .status-failed     { background: rgba(254,44,85,.15);  color: #ff6b85; border: 1px solid rgba(254,44,85,.3); }
+    .status-cancelled  { background: rgba(100,100,100,.15);color: #888;    border: 1px solid rgba(100,100,100,.3); }
+
+    /* ── Toast ─────────────────────────────── */
+    #toast-container {
+      position: fixed;
+      top: 20px; right: 20px;
+      z-index: 9999;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .toast {
+      padding: 12px 18px;
+      border-radius: 10px;
+      font-size: 13px;
+      font-weight: 500;
+      max-width: 340px;
+      box-shadow: 0 4px 20px rgba(0,0,0,.5);
+      animation: toastIn .3s ease;
+    }
+    .toast-success { background:#0e3b2c; border:1px solid #22c55e; color:#4ade80; }
+    .toast-error   { background:#3b0e17; border:1px solid #FE2C55; color:#ff6b85; }
+    .toast-info    { background:#0e1f3b; border:1px solid #3b82f6; color:#93c5fd; }
+    @keyframes toastIn {
+      from { transform: translateX(80px); opacity:0; }
+      to   { transform: translateX(0);    opacity:1; }
+    }
+
+    /* ── Queue row ──────────────────────────── */
+    .queue-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px;
+      background: #111;
+      border: 1px solid #1e1e1e;
+      border-radius: 10px;
+    }
+    .queue-thumb {
+      width: 60px;
+      height: 34px;
+      border-radius: 6px;
+      object-fit: cover;
+      flex-shrink: 0;
+      background: #161616;
+    }
+    .queue-thumb-placeholder {
+      width: 60px;
+      height: 34px;
+      border-radius: 6px;
+      background: #161616;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px;
+      flex-shrink: 0;
+    }
+    .queue-info { flex: 1; min-width: 0; }
+    .queue-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: #ddd;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .queue-countdown {
+      font-size: 12px;
+      color: #666;
+      margin-top: 2px;
+    }
+    .queue-countdown .time { color: #25F4EE; font-weight: 600; }
+
+    /* ── Tabs ───────────────────────────────── */
+    .tab-btn {
+      padding: 8px 18px;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all .2s;
+      color: #666;
+      background: transparent;
+      border: 1px solid transparent;
+    }
+    .tab-btn.active {
+      color: #FE2C55;
+      border-color: rgba(254,44,85,.35);
+      background: rgba(254,44,85,.08);
+    }
+    .tab-btn:hover:not(.active) { color: #aaa; }
+
+    /* ── Action bar ─────────────────────────── */
+    #action-bar {
+      position: fixed;
+      bottom: 0; left: 0; right: 0;
+      background: rgba(10,10,10,.95);
+      border-top: 1px solid #222;
+      backdrop-filter: blur(12px);
+      padding: 14px 24px;
+      z-index: 100;
+      display: none;
+    }
+
+    /* ── Avatar ─────────────────────────────── */
+    .avatar-circle {
+      width: 36px; height: 36px;
+      border-radius: 50%;
+      background: #FE2C55;
+      border: 2px solid #FE2C55;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      font-size: 15px;
+      color: #fff;
+      flex-shrink: 0;
+    }
+
+    /* ── Section heading ─────────────────────── */
+    .section-title {
+      font-size: 15px;
+      font-weight: 700;
+      color: #e8e8e8;
+      margin-bottom: 4px;
+    }
+    .section-sub {
+      font-size: 13px;
+      color: #555;
+    }
+
+    /* ── Scrollbar ───────────────────────────── */
+    ::-webkit-scrollbar { width: 5px; }
+    ::-webkit-scrollbar-track { background: #0d0d0d; }
+    ::-webkit-scrollbar-thumb { background: #2a2a2a; border-radius: 3px; }
+
+    /* ── Fade in ─────────────────────────────── */
+    .fade-in { animation: fadeIn .4s ease; }
+    @keyframes fadeIn {
+      from { opacity:0; transform:translateY(10px); }
+      to   { opacity:1; transform:translateY(0); }
+    }
+
+    /* ── Responsive grid ─────────────────────── */
+    .video-grid {
+      display: grid;
+      gap: 14px;
+      grid-template-columns: repeat(2, 1fr);
+    }
+    @media (min-width: 768px)  { .video-grid { grid-template-columns: repeat(3, 1fr); } }
+    @media (min-width: 1024px) { .video-grid { grid-template-columns: repeat(5, 1fr); } }
+  </style>
+</head>
+<body>
+
+<!-- Toast container -->
+<div id="toast-container"></div>
+
+<!-- ════════════════════════════════════════
+     LOGIN SCREEN
+════════════════════════════════════════ -->
+<div id="login-screen" class="login-bg min-h-screen flex flex-col items-center justify-center px-4">
+
+  <div class="text-center mb-10">
+    <div class="flex items-center justify-center gap-3 mb-5">
+      <svg width="40" height="40" viewBox="0 0 24 24" fill="none">
+        <path d="M19.59 6.69a4.83 4.83 0 01-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 01-2.88 2.5 2.89 2.89 0 01-2.89-2.89 2.89 2.89 0 012.89-2.89c.28 0 .54.04.79.1V9.01a6.27 6.27 0 00-.79-.05 6.34 6.34 0 00-6.34 6.34 6.34 6.34 0 006.34 6.34 6.34 6.34 0 006.33-6.34V9.07a8.16 8.16 0 004.77 1.52V7.16a4.85 4.85 0 01-1-.47z" fill="#FE2C55"/>
+      </svg>
+      <h1 class="text-3xl font-black" style="color:#fff">TikTok <span style="color:#FE2C55">Affiliate</span></h1>
+    </div>
+    <p class="text-gray-500 text-sm">Repost video với link affiliate tự động</p>
+  </div>
+
+  <div class="card text-center" style="max-width:400px;width:100%">
+    <h2 class="text-lg font-bold mb-1">Bắt đầu</h2>
+    <p class="text-gray-500 text-sm mb-7">Kết nối tài khoản TikTok để lên lịch đăng bài</p>
+
+    <button id="login-btn" class="btn-tiktok" onclick="handleLogin()">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+        <path d="M19.59 6.69a4.83 4.83 0 01-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 01-2.88 2.5 2.89 2.89 0 01-2.89-2.89 2.89 2.89 0 012.89-2.89c.28 0 .54.04.79.1V9.01a6.27 6.27 0 00-.79-.05 6.34 6.34 0 00-6.34 6.34 6.34 6.34 0 006.34 6.34 6.34 6.34 0 006.33-6.34V9.07a8.16 8.16 0 004.77 1.52V7.16a4.85 4.85 0 01-1-.47z" fill="#FE2C55"/>
+      </svg>
+      <span id="login-btn-text">Kết nối tài khoản TikTok</span>
+      <span id="login-spinner" class="spinner" style="display:none"></span>
+    </button>
+
+    <div id="login-waiting" class="hidden mt-4 p-3 rounded-lg text-sm text-yellow-300" style="background:rgba(255,200,0,.08);border:1px solid rgba(255,200,0,.25)">
+      Chrome đang mở — hãy <strong>tự đăng nhập TikTok</strong> trong cửa sổ hiện ra. App tự lấy cookie sau khi bạn vào trang chủ.
+    </div>
+    <div id="login-error" class="hidden mt-3 p-3 rounded-lg text-sm text-red-400" style="background:rgba(255,0,0,.08);border:1px solid rgba(255,0,0,.25)"></div>
+    <p class="text-gray-700 text-xs mt-6">Tài khoản được cấu hình trong file <code>.env</code></p>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════
+     DASHBOARD
+════════════════════════════════════════ -->
+<div id="dashboard" style="display:none">
+
+  <!-- Header -->
+  <header class="sticky top-0 z-50 flex items-center justify-between px-6 py-3"
+          style="background:rgba(10,10,10,.95);border-bottom:1px solid #1e1e1e;backdrop-filter:blur(10px)">
+    <div class="flex items-center gap-2">
+      <svg width="26" height="26" viewBox="0 0 24 24" fill="none">
+        <path d="M19.59 6.69a4.83 4.83 0 01-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 01-2.88 2.5 2.89 2.89 0 01-2.89-2.89 2.89 2.89 0 012.89-2.89c.28 0 .54.04.79.1V9.01a6.27 6.27 0 00-.79-.05 6.34 6.34 0 00-6.34 6.34 6.34 6.34 0 006.34 6.34 6.34 6.34 0 006.33-6.34V9.07a8.16 8.16 0 004.77 1.52V7.16a4.85 4.85 0 01-1-.47z" fill="#FE2C55"/>
+      </svg>
+      <span class="font-black text-base" style="color:#fff">TikTok <span style="color:#FE2C55">Affiliate</span> Tool</span>
+    </div>
+    <div class="flex items-center gap-3">
+      <div id="user-avatar" class="avatar-circle">T</div>
+      <span id="user-name" class="text-sm text-gray-300 font-medium hidden sm:block"></span>
+      <button onclick="handleLogout()"
+              class="text-xs text-gray-500 hover:text-red-400 transition-colors px-2 py-1 rounded border border-transparent hover:border-red-900">
+        Đăng xuất
+      </button>
+    </div>
+  </header>
+
+  <!-- Tab bar -->
+  <div class="flex items-center gap-2 px-6 pt-5 pb-1">
+    <button class="tab-btn active" id="tab-videos" onclick="switchTab('videos')">Chọn video</button>
+    <button class="tab-btn" id="tab-queue" onclick="switchTab('queue')">
+      Hàng chờ
+      <span id="queue-badge" class="hidden ml-1 text-xs bg-red-600 text-white px-1.5 py-0.5 rounded-full"></span>
+    </button>
+  </div>
+
+  <!-- ── TAB: Chọn video ─────────────────── -->
+  <div id="view-videos" class="max-w-7xl mx-auto px-4 sm:px-6 py-5 space-y-6 pb-28">
+
+    <!-- Fetch section -->
+    <div class="card">
+      <div class="section-title mb-1">Lấy video từ profile TikTok</div>
+      <div class="section-sub mb-4">Nhập link profile để lấy 10 video mới nhất</div>
+      <div class="flex gap-3">
+        <input
+          id="profile-url"
+          type="url"
+          class="input-field"
+          placeholder="https://www.tiktok.com/@username"
+          onkeydown="if(event.key==='Enter')fetchVideos()"
+        />
+        <button id="fetch-btn" class="btn-primary" onclick="fetchVideos()">
+          <span id="fetch-btn-text">Lấy 10 video</span>
+          <span id="fetch-spinner" class="spinner" style="display:none"></span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Video grid -->
+    <div id="video-grid-section" style="display:none" class="fade-in">
+      <div class="flex items-center justify-between mb-4">
+        <div>
+          <div class="section-title">Chọn video để lên lịch</div>
+          <div class="section-sub" id="video-count-label"></div>
+        </div>
+        <div class="flex items-center gap-3">
+          <button id="load-products-btn" onclick="loadShowcaseProducts()" class="btn-primary" style="padding:7px 14px;font-size:12px">
+            <span id="load-products-text">🛍️ Tải sản phẩm</span>
+            <span id="load-products-spinner" class="spinner" style="display:none"></span>
+          </button>
+          <span id="products-status" class="text-xs text-gray-500"></span>
+          <button onclick="clearSelection()" class="text-xs text-gray-600 hover:text-gray-400 transition-colors">Bỏ chọn tất cả</button>
+        </div>
+      </div>
+      <div id="video-grid" class="video-grid"></div>
+    </div>
+
+  </div>
+
+  <!-- ── TAB: Hàng chờ ──────────────────── -->
+  <div id="view-queue" class="max-w-4xl mx-auto px-4 sm:px-6 py-5 pb-10" style="display:none">
+    <div class="flex items-center justify-between mb-4">
+      <div>
+        <div class="section-title">Hàng chờ đăng bài</div>
+        <div class="section-sub">Cập nhật mỗi 3 giây</div>
+      </div>
+      <button onclick="loadQueue()" class="text-xs text-gray-500 hover:text-gray-300 transition-colors flex items-center gap-1">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M1 4v6h6M23 20v-6h-6"/>
+          <path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/>
+        </svg>
+        Làm mới
+      </button>
+    </div>
+    <div id="queue-list" class="space-y-3"></div>
+    <div id="queue-empty" class="text-center py-16 text-gray-600" style="display:none">
+      <div class="text-4xl mb-3">📭</div>
+      <div class="font-medium">Chưa có bài nào trong hàng chờ</div>
+      <div class="text-sm mt-1">Chọn video và lên lịch ở tab "Chọn video"</div>
+    </div>
+  </div>
+
+</div>
+
+<!-- ── Action bar (sticky bottom) ─────────── -->
+<div id="action-bar">
+  <div class="max-w-7xl mx-auto flex items-center justify-between gap-4">
+    <div class="text-sm text-gray-400">
+      Đã chọn <span id="selected-count" class="font-bold" style="color:#FE2C55">0</span> video
+    </div>
+    <button id="schedule-btn" class="btn-primary" onclick="submitSchedule()">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+        <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
+        <line x1="16" y1="2" x2="16" y2="6"/>
+        <line x1="8" y1="2" x2="8" y2="6"/>
+        <line x1="3" y1="10" x2="21" y2="10"/>
+      </svg>
+      Lên lịch đăng
+    </button>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════
+     SCRIPTS
+════════════════════════════════════════ -->
+<script>
+// ── State ──────────────────────────────────────────────────────────────────
+const state = {
+  isLoggedIn: false,
+  user: null,
+  videos: [],              // [{id, url, title, caption, thumbnail, duration}]
+  selected: new Set(),     // set of video ids
+  affiliateLinks: {},      // id -> affiliate url string (manual URL mode)
+  selectedProduct: {},     // id -> product_id string (showcase mode)
+  attachLink: {},          // id -> bool: whether to attach product link
+  delayMinutes: {},        // id -> delay in minutes
+  products: [],            // [{id, name, price, image}] from TikTok Shop showcase
+  productsLoading: false,
+  queueInterval: null,
+  currentTab: 'videos',
+};
+
+// ── Bootstrap ───────────────────────────────────────────────────────────────
+window.addEventListener('DOMContentLoaded', () => {
+  checkAuthStatus();
+});
+
+// ── Auth ────────────────────────────────────────────────────────────────────
+async function checkAuthStatus() {
+  try {
+    const res = await fetch('/auth/status');
+    const data = await res.json();
+    if (data.logged_in) {
+      state.isLoggedIn = true;
+      state.user = data;
+      showDashboard(data);
+    } else {
+      showLoginScreen();
+    }
+  } catch {
+    showLoginScreen();
+  }
+}
+
+async function handleLogin() {
+  const btn = document.getElementById('login-btn');
+  const btnText = document.getElementById('login-btn-text');
+  const spinner = document.getElementById('login-spinner');
+  const waiting = document.getElementById('login-waiting');
+  const errBox = document.getElementById('login-error');
+
+  btn.disabled = true;
+  btnText.textContent = 'Đang mở trình duyệt...';
+  spinner.style.display = 'inline-block';
+  waiting.classList.remove('hidden');
+  errBox.classList.add('hidden');
+
+  try {
+    const res = await fetch('/auth/connect', { method: 'POST' });
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+
+    let attempts = 0;
+    const poll = setInterval(async () => {
+      attempts++;
+      try {
+        const s = await fetch('/auth/login-status').then(r => r.json());
+        if (!s.running && !s.error) {
+          clearInterval(poll);
+          waiting.classList.add('hidden');
+          const authRes = await fetch('/auth/status');
+          const authData = await authRes.json();
+          if (authData.logged_in) {
+            state.isLoggedIn = true;
+            state.user = authData;
+            showDashboard(authData);
+            showToast('Kết nối TikTok thành công!', 'success');
+          } else {
+            resetLoginBtn();
+            showToast('Kết nối xong nhưng không xác thực được. Hãy thử lại.', 'error');
+          }
+        } else if (s.error) {
+          clearInterval(poll);
+          waiting.classList.add('hidden');
+          errBox.textContent = s.error;
+          errBox.classList.remove('hidden');
+          resetLoginBtn();
+        } else if (attempts > 150) {
+          clearInterval(poll);
+          waiting.classList.add('hidden');
+          errBox.textContent = 'Hết thời gian chờ. Vui lòng thử lại.';
+          errBox.classList.remove('hidden');
+          resetLoginBtn();
+        }
+      } catch { /* ignore poll errors */ }
+    }, 2000);
+  } catch (e) {
+    waiting.classList.add('hidden');
+    errBox.textContent = e.message || 'Lỗi kết nối';
+    errBox.classList.remove('hidden');
+    resetLoginBtn();
+  }
+}
+
+function resetLoginBtn() {
+  const btn = document.getElementById('login-btn');
+  const btnText = document.getElementById('login-btn-text');
+  const spinner = document.getElementById('login-spinner');
+  btn.disabled = false;
+  btnText.textContent = 'Kết nối tài khoản TikTok';
+  spinner.style.display = 'none';
+}
+
+async function handleLogout() {
+  try {
+    await fetch('/auth/logout', { method: 'POST' });
+  } catch {}
+  state.isLoggedIn = false;
+  state.user = null;
+  stopQueuePolling();
+  showLoginScreen();
+  showToast('Đã đăng xuất', 'info');
+}
+
+function showLoginScreen() {
+  document.getElementById('login-screen').style.display = '';
+  document.getElementById('dashboard').style.display = 'none';
+}
+
+function showDashboard(user) {
+  document.getElementById('login-screen').style.display = 'none';
+  document.getElementById('dashboard').style.display = 'block';
+
+  const name = user.username || 'TikTok User';
+  document.getElementById('user-name').textContent = name;
+  document.getElementById('user-avatar').textContent = name[0].toUpperCase();
+}
+
+// ── Tab switching ────────────────────────────────────────────────────────────
+function switchTab(tab) {
+  state.currentTab = tab;
+  document.getElementById('view-videos').style.display = tab === 'videos' ? 'block' : 'none';
+  document.getElementById('view-queue').style.display  = tab === 'queue'  ? 'block' : 'none';
+  document.getElementById('tab-videos').classList.toggle('active', tab === 'videos');
+  document.getElementById('tab-queue').classList.toggle('active', tab === 'queue');
+
+  if (tab === 'queue') {
+    loadQueue();
+    startQueuePolling();
+  } else {
+    stopQueuePolling();
+  }
+}
+
+// ── Fetch videos ─────────────────────────────────────────────────────────────
+async function fetchVideos() {
+  const url = document.getElementById('profile-url').value.trim();
+  if (!url) { showToast('Vui lòng nhập link profile TikTok', 'error'); return; }
+
+  const btn = document.getElementById('fetch-btn');
+  const btnText = document.getElementById('fetch-btn-text');
+  const spinner = document.getElementById('fetch-spinner');
+  btn.disabled = true;
+  btnText.textContent = 'Đang lấy...';
+  spinner.style.display = 'inline-block';
+
+  try {
+    const res = await fetch('/profile/videos', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'Lỗi lấy video');
+
+    state.videos = data.videos || [];
+    state.selected.clear();
+    state.affiliateLinks = {};
+    state.attachLink = {};
+    state.delayMinutes = {};
+
+    renderVideoGrid();
+    document.getElementById('video-grid-section').style.display = 'block';
+    document.getElementById('video-count-label').textContent =
+      `Tìm thấy ${state.videos.length} video`;
+    updateActionBar();
+    showToast(`Lấy được ${state.videos.length} video!`, 'success');
+  } catch (e) {
+    showToast(e.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btnText.textContent = 'Lấy 10 video';
+    spinner.style.display = 'none';
+  }
+}
+
+// ── Render video grid ─────────────────────────────────────────────────────────
+function renderVideoGrid() {
+  const grid = document.getElementById('video-grid');
+  grid.innerHTML = '';
+  state.videos.forEach((v, idx) => {
+    grid.appendChild(buildVideoCard(v, idx));
+  });
+}
+
+function buildVideoCard(v, idx) {
+  const card = document.createElement('div');
+  card.className = 'video-card';
+  card.id = `card-${v.id}`;
+  card.addEventListener('click', e => {
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+    toggleCard(v.id, idx);
+  });
+
+  const durStr = formatDuration(v.duration);
+  const thumbHtml = v.thumbnail
+    ? `<img src="${escHtml(v.thumbnail)}" alt="" loading="lazy" onerror="this.outerHTML='<div class=thumb-fallback>🎬</div>'">`
+    : `<div class="thumb-fallback">🎬</div>`;
+
+  card.innerHTML = `
+    <div class="card-thumb">
+      ${thumbHtml}
+      ${durStr ? `<div class="duration-badge">${escHtml(durStr)}</div>` : ''}
+      <div class="checkbox-overlay">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3">
+          <polyline points="20 6 9 17 4 12"/>
+        </svg>
+      </div>
+    </div>
+    <div class="card-body">
+      <div class="card-title">${escHtml(v.title)}</div>
+      <div class="card-caption">${escHtml(v.caption || '(Không có caption)')}</div>
+    </div>
+    <div class="card-inputs" id="inputs-${v.id}" style="display:none">
+      <div style="display:flex;gap:8px;margin-bottom:6px">
+        <button
+          id="btn-attach-${v.id}"
+          onclick="setAttachLink('${v.id}', true, event)"
+          style="flex:1;padding:6px 4px;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;border:1.5px solid #FE2C55;background:#FE2C55;color:#fff;transition:all .2s"
+        >🛍️ Gắn link</button>
+        <button
+          id="btn-nolink-${v.id}"
+          onclick="setAttachLink('${v.id}', false, event)"
+          style="flex:1;padding:6px 4px;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;border:1.5px solid #444;background:transparent;color:#aaa;transition:all .2s"
+        >📹 Chỉ đăng video</button>
+      </div>
+      <div id="affiliate-row-${v.id}">
+        <!-- ── Showcase product picker (primary) ── -->
+        <label class="card-input-label">🛍️ Chọn sản phẩm affiliate</label>
+
+        <!-- Products loaded: dropdown -->
+        <div id="product-picker-${v.id}" style="display:${state.products.length > 0 ? 'block' : 'none'}">
+          <select
+            class="card-input"
+            id="product-select-${v.id}"
+            onchange="onProductSelect('${v.id}')"
+            onclick="event.stopPropagation()"
+            style="width:100%"
+          >
+            <option value="">-- Chọn sản phẩm --</option>
+            ${state.products.map(p => `<option value="${escHtml(p.id)}" ${state.selectedProduct[v.id] === p.id ? 'selected' : ''}>${escHtml(p.name)}${p.price ? ' · ' + escHtml(p.price) : ''}</option>`).join('')}
+          </select>
+        </div>
+
+        <!-- Products NOT loaded: inline load button -->
+        <div id="picker-empty-${v.id}" style="display:${state.products.length > 0 ? 'none' : 'block'}">
+          <button
+            onclick="loadShowcaseProducts();event.stopPropagation()"
+            id="inline-load-${v.id}"
+            style="width:100%;padding:7px 10px;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;border:1.5px dashed #444;background:transparent;color:#888;transition:all .2s;text-align:center"
+            onmouseover="this.style.borderColor='#FE2C55';this.style.color='#FE2C55'"
+            onmouseout="this.style.borderColor='#444';this.style.color='#888'"
+          >🔄 Nhấn để tải sản phẩm TikTok Shop</button>
+          <div style="font-size:10px;color:#444;margin-top:3px;text-align:center">Sẽ mở Chrome để lấy danh sách sản phẩm affiliate của bạn</div>
+        </div>
+
+        <!-- ── URL fallback (secondary) ── -->
+        <div style="margin-top:6px">
+          <label class="card-input-label" style="color:#444;font-size:10px;margin-bottom:3px">Hoặc nhập link thủ công:</label>
+          <input
+            class="card-input"
+            type="url"
+            id="affiliate-${v.id}"
+            placeholder="https://vt.tiktok.com/..."
+            value="${escHtml(state.affiliateLinks[v.id] || v.product_url || '')}"
+            oninput="onAffiliateInput('${v.id}')"
+            onclick="event.stopPropagation()"
+            style="opacity:0.6"
+            onfocus="this.style.opacity='1'"
+            onblur="this.style.opacity='0.6'"
+          />
+          ${v.product_url ? `<div style="font-size:10px;color:#25F4EE;margin-top:2px">✓ Tự phát hiện từ caption</div>` : ''}
+        </div>
+      </div>
+      <div>
+        <label class="card-input-label">⏱ Đăng sau (phút)</label>
+        <div class="card-input-row">
+          <input
+            class="card-input"
+            type="number"
+            id="delay-${v.id}"
+            min="0"
+            value="${state.delayMinutes[v.id] ?? (idx * 30)}"
+            oninput="onDelayInput('${v.id}')"
+            onclick="event.stopPropagation()"
+            style="width:80px;flex-shrink:0"
+          />
+          <div class="post-time-hint" id="hint-${v.id}"></div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  // Initialise state for this card
+  if (state.delayMinutes[v.id] === undefined) {
+    state.delayMinutes[v.id] = idx * 30;
+  }
+  if (state.attachLink[v.id] === undefined) {
+    state.attachLink[v.id] = !!(v.product_url);
+  }
+
+  return card;
+}
+
+function setAttachLink(id, attach, e) {
+  if (e) e.stopPropagation();
+  state.attachLink[id] = attach;
+
+  const btnAttach = document.getElementById(`btn-attach-${id}`);
+  const btnNo     = document.getElementById(`btn-nolink-${id}`);
+  const row       = document.getElementById(`affiliate-row-${id}`);
+
+  if (attach) {
+    btnAttach.style.background = '#FE2C55';
+    btnAttach.style.borderColor = '#FE2C55';
+    btnAttach.style.color = '#fff';
+    btnNo.style.background = 'transparent';
+    btnNo.style.borderColor = '#444';
+    btnNo.style.color = '#aaa';
+    row.style.display = 'block';
+  } else {
+    btnNo.style.background = '#444';
+    btnNo.style.borderColor = '#666';
+    btnNo.style.color = '#fff';
+    btnAttach.style.background = 'transparent';
+    btnAttach.style.borderColor = '#444';
+    btnAttach.style.color = '#aaa';
+    row.style.display = 'none';
+  }
+  updateActionBar();
+}
+
+function toggleCard(id, idx) {
+  if (state.selected.has(id)) {
+    state.selected.delete(id);
+    document.getElementById(`card-${id}`).classList.remove('selected');
+    document.getElementById(`inputs-${id}`).style.display = 'none';
+  } else {
+    state.selected.add(id);
+    document.getElementById(`card-${id}`).classList.add('selected');
+    document.getElementById(`inputs-${id}`).style.display = 'flex';
+    // Apply current attach state to buttons/row
+    setAttachLink(id, state.attachLink[id] !== false, null);
+    updatePostTimeHint(id);
+  }
+  updateActionBar();
+}
+
+function clearSelection() {
+  state.selected.forEach(id => {
+    document.getElementById(`card-${id}`)?.classList.remove('selected');
+    const inp = document.getElementById(`inputs-${id}`);
+    if (inp) inp.style.display = 'none';
+  });
+  state.selected.clear();
+  updateActionBar();
+}
+
+function onAffiliateInput(id) {
+  const val = document.getElementById(`affiliate-${id}`)?.value || '';
+  state.affiliateLinks[id] = val;
+  updateActionBar();
+}
+
+function onProductSelect(id) {
+  const sel = document.getElementById(`product-select-${id}`);
+  state.selectedProduct[id] = sel ? sel.value : '';
+  updateActionBar();
+}
+
+async function loadShowcaseProducts() {
+  if (state.productsLoading) return;
+  state.productsLoading = true;
+
+  const btn    = document.getElementById('load-products-btn');
+  const text   = document.getElementById('load-products-text');
+  const spinner= document.getElementById('load-products-spinner');
+  const status = document.getElementById('products-status');
+
+  // Update all inline card load buttons too
+  const inlineBtns = document.querySelectorAll('[id^="inline-load-"]');
+
+  if (btn) btn.disabled = true;
+  if (text) text.textContent = 'Đang tải...';
+  if (spinner) spinner.style.display = 'inline-block';
+  if (status) status.textContent = '';
+  inlineBtns.forEach(b => { b.disabled = true; b.textContent = '⏳ Đang tải sản phẩm...'; });
+
+  try {
+    const res = await fetch('/product/showcase/refresh', { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'Lỗi tải sản phẩm');
+    state.products = data.products || [];
+    loadProductsIntoCards();
+    if (status) status.textContent = `${state.products.length} sản phẩm`;
+    showToast(`Tải được ${state.products.length} sản phẩm!`, 'success');
+  } catch (e) {
+    showToast(e.message, 'error');
+    if (status) status.textContent = 'Lỗi';
+    inlineBtns.forEach(b => { b.disabled = false; b.textContent = '🔄 Nhấn để tải sản phẩm TikTok Shop'; });
+  } finally {
+    state.productsLoading = false;
+    if (btn) btn.disabled = false;
+    if (text) text.textContent = '🛍️ Tải sản phẩm';
+    if (spinner) spinner.style.display = 'none';
+  }
+}
+
+function loadProductsIntoCards() {
+  const opts = state.products.map(p =>
+    `<option value="${escHtml(p.id)}">${escHtml(p.name)}${p.price ? ' · ' + escHtml(p.price) : ''}</option>`
+  ).join('');
+
+  state.videos.forEach(v => {
+    const picker = document.getElementById(`product-picker-${v.id}`);
+    const pickerEmpty = document.getElementById(`picker-empty-${v.id}`);
+    const sel = document.getElementById(`product-select-${v.id}`);
+    if (!picker || !sel) return;
+
+    sel.innerHTML = `<option value="">-- Chọn sản phẩm --</option>${opts}`;
+    const current = state.selectedProduct[v.id] || '';
+    if (current) sel.value = current;
+
+    picker.style.display = 'block';
+    if (pickerEmpty) pickerEmpty.style.display = 'none';
+  });
+}
+
+function onDelayInput(id) {
+  const val = parseInt(document.getElementById(`delay-${id}`)?.value) || 0;
+  state.delayMinutes[id] = val;
+  updatePostTimeHint(id);
+}
+
+function updatePostTimeHint(id) {
+  const hint = document.getElementById(`hint-${id}`);
+  if (!hint) return;
+  const mins = state.delayMinutes[id] ?? 0;
+  const postAt = new Date(Date.now() + mins * 60000);
+  const hh = String(postAt.getHours()).padStart(2, '0');
+  const mm = String(postAt.getMinutes()).padStart(2, '0');
+  hint.innerHTML = `Đăng lúc: <span>${hh}:${mm}</span>`;
+}
+
+function updateActionBar() {
+  const bar = document.getElementById('action-bar');
+  const count = state.selected.size;
+  document.getElementById('selected-count').textContent = count;
+
+  if (count === 0) {
+    bar.style.display = 'none';
+    return;
+  }
+  bar.style.display = 'block';
+
+  const anyMissing = [...state.selected].some(id => {
+    if (state.attachLink[id] === false) return false;
+    const hasProduct = !!(state.selectedProduct[id] || '').trim();
+    const hasUrl = !!(state.affiliateLinks[id] || '').trim();
+    return !hasProduct && !hasUrl;
+  });
+  const btn = document.getElementById('schedule-btn');
+  btn.disabled = anyMissing;
+  btn.title = anyMissing ? 'Chọn sản phẩm hoặc nhập link, hoặc chọn "Chỉ đăng video"' : '';
+}
+
+// ── Submit schedule ───────────────────────────────────────────────────────────
+async function submitSchedule() {
+  if (state.selected.size === 0) { showToast('Chưa chọn video nào', 'error'); return; }
+
+  const videos = [];
+  for (const id of state.selected) {
+    const v = state.videos.find(x => x.id === id);
+    if (!v) continue;
+    const wantLink = state.attachLink[id] !== false;
+    const productId = wantLink ? (state.selectedProduct[id] || '').trim() : '';
+    const affiliate = (wantLink && !productId) ? (state.affiliateLinks[id] || '').trim() : '';
+    if (wantLink && !productId && !affiliate) {
+      showToast(`Video "${(v.title||'').slice(0,40)}..." chưa chọn sản phẩm hoặc nhập link`, 'error');
+      return;
+    }
+    videos.push({
+      video_url: v.url,
+      caption: v.caption || v.title || '',
+      product_url: affiliate,
+      product_id: productId,
+      delay_minutes: state.delayMinutes[id] ?? 0,
+      thumbnail: v.thumbnail || '',
+      title: v.title || '',
+    });
+  }
+
+  const btn = document.getElementById('schedule-btn');
+  btn.disabled = true;
+  btn.textContent = 'Đang lên lịch...';
+
+  try {
+    const res = await fetch('/schedule/create', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ videos }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'Lỗi lên lịch');
+
+    showToast(`Đã lên lịch ${data.scheduled} video!`, 'success');
+    clearSelection();
+    switchTab('queue');
+  } catch (e) {
+    showToast(e.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = `
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+        <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
+        <line x1="16" y1="2" x2="16" y2="6"/>
+        <line x1="8" y1="2" x2="8" y2="6"/>
+        <line x1="3" y1="10" x2="21" y2="10"/>
+      </svg>
+      Lên lịch đăng`;
+    updateActionBar();
+  }
+}
+
+// ── Queue ─────────────────────────────────────────────────────────────────────
+async function loadQueue() {
+  try {
+    const res = await fetch('/schedule/list');
+    const data = await res.json();
+    renderQueue(data.items || []);
+  } catch {
+    // silently fail poll
+  }
+}
+
+function renderQueue(items) {
+  const list = document.getElementById('queue-list');
+  const empty = document.getElementById('queue-empty');
+  const badge = document.getElementById('queue-badge');
+
+  if (!items || items.length === 0) {
+    list.innerHTML = '';
+    empty.style.display = 'block';
+    badge.classList.add('hidden');
+    return;
+  }
+
+  empty.style.display = 'none';
+
+  // Show badge with active count
+  const active = items.filter(i => ['pending', 'downloading', 'posting'].includes(i.status)).length;
+  if (active > 0) {
+    badge.textContent = active;
+    badge.classList.remove('hidden');
+  } else {
+    badge.classList.add('hidden');
+  }
+
+  list.innerHTML = items.map(item => buildQueueRow(item)).join('');
+}
+
+function buildQueueRow(item) {
+  const thumbHtml = item.thumbnail
+    ? `<img src="${escHtml(item.thumbnail)}" class="queue-thumb" onerror="this.outerHTML='<div class=queue-thumb-placeholder>🎬</div>'">`
+    : `<div class="queue-thumb-placeholder">🎬</div>`;
+
+  const statusHtml = buildStatusBadge(item.status);
+
+  let countdownHtml = '';
+  if (item.status === 'pending' && item.seconds_remaining > 0) {
+    countdownHtml = `<div class="queue-countdown">Đăng sau <span class="time">${formatSeconds(item.seconds_remaining)}</span></div>`;
+  } else if (item.status === 'done') {
+    const profileUrl = item.profile_url || 'https://www.tiktok.com/@l.e.v.e.l.shop';
+    countdownHtml = `
+      <div class="queue-countdown">Đã đăng lúc <span class="time">${escHtml(item.post_at_str || '')}</span></div>
+      <a href="${escHtml(profileUrl)}" target="_blank" style="font-size:12px;color:#25F4EE;text-decoration:none;margin-top:4px;display:inline-block">
+        👁 Xem trên TikTok →
+      </a>`;
+  } else if (item.status === 'failed') {
+    countdownHtml = `<div class="queue-countdown" style="color:#ff6b85">${escHtml(item.error || 'Lỗi không xác định')}</div>`;
+  } else if (item.status === 'cancelled') {
+    countdownHtml = `<div class="queue-countdown">Đã huỷ</div>`;
+  } else if (['downloading', 'posting'].includes(item.status)) {
+    countdownHtml = `<div class="queue-countdown">Dự kiến đăng lúc <span class="time">${escHtml(item.post_at_str || '')}</span></div>`;
+  }
+
+  const cancelBtn = item.status === 'pending'
+    ? `<button class="btn-sm btn-cancel" onclick="cancelItem('${escHtml(item.id)}')">Huỷ</button>`
+    : '';
+
+  return `
+    <div class="queue-row" id="qrow-${escHtml(item.id)}">
+      ${thumbHtml}
+      <div class="queue-info">
+        <div class="queue-title">${escHtml(item.title || item.video_url)}</div>
+        ${countdownHtml}
+      </div>
+      <div class="flex items-center gap-2 flex-shrink-0">
+        ${statusHtml}
+        ${cancelBtn}
+      </div>
+    </div>`;
+}
+
+function buildStatusBadge(status) {
+  const map = {
+    pending:     { cls: 'status-pending',     icon: '⏳', label: 'Chờ' },
+    downloading: { cls: 'status-downloading', icon: '⬇️', label: 'Đang tải' },
+    posting:     { cls: 'status-posting',     icon: '📤', label: 'Đang đăng' },
+    done:        { cls: 'status-done',        icon: '✅', label: 'Xong' },
+    failed:      { cls: 'status-failed',      icon: '❌', label: 'Thất bại' },
+    cancelled:   { cls: 'status-cancelled',   icon: '🚫', label: 'Huỷ' },
+  };
+  const s = map[status] || { cls: 'status-cancelled', icon: '?', label: status };
+  const pulse = ['downloading', 'posting'].includes(status) ? ' pulse' : '';
+  return `<span class="status-badge ${s.cls}${pulse}">${s.icon} ${s.label}</span>`;
+}
+
+async function cancelItem(id) {
+  try {
+    const res = await fetch(`/schedule/${id}`, { method: 'DELETE' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'Lỗi huỷ');
+    showToast('Đã huỷ lịch đăng', 'info');
+    loadQueue();
+  } catch (e) {
+    showToast(e.message, 'error');
+  }
+}
+
+function startQueuePolling() {
+  stopQueuePolling();
+  state.queueInterval = setInterval(loadQueue, 3000);
+}
+
+function stopQueuePolling() {
+  if (state.queueInterval) {
+    clearInterval(state.queueInterval);
+    state.queueInterval = null;
+  }
+}
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+function formatDuration(secs) {
+  if (!secs || secs <= 0) return '';
+  const m = Math.floor(secs / 60);
+  const s = secs % 60;
+  return m > 0 ? `${m}:${String(s).padStart(2, '0')}` : `0:${String(s).padStart(2, '0')}`;
+}
+
+function formatSeconds(totalSec) {
+  if (totalSec <= 0) return '0 giây';
+  const m = Math.floor(totalSec / 60);
+  const s = totalSec % 60;
+  if (m === 0) return `${s} giây`;
+  if (s === 0) return `${m} phút`;
+  return `${m} phút ${s} giây`;
+}
+
+function escHtml(str) {
+  if (str == null) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+// ── Toast ─────────────────────────────────────────────────────────────────────
+function showToast(message, type = 'info') {
+  const container = document.getElementById('toast-container');
+  const toast = document.createElement('div');
+  toast.className = `toast toast-${type}`;
+  toast.textContent = message;
+  container.appendChild(toast);
+  const duration = type === 'error' ? 5000 : 3000;
+  setTimeout(() => {
+    toast.style.transition = 'opacity .3s';
+    toast.style.opacity = '0';
+    setTimeout(() => toast.remove(), 320);
+  }, duration);
+}
+</script>
+</body>
+</html>
