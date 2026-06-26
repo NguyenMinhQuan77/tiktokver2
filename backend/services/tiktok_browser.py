@@ -104,6 +104,82 @@ async def _dismiss_popups(page):
             continue
 
 
+async def _dismiss_content_warning_dialog(page):
+    """
+    Close the 'Content may be restricted' modal that TikTok shows after content check.
+    This modal blocks the Post button — must be closed before posting.
+    """
+    try:
+        # Check if the modal is actually visible
+        modal_heading = page.locator('text="Content may be restricted"').first
+        if await modal_heading.count() == 0 or not await modal_heading.is_visible():
+            # Try Vietnamese variant
+            modal_heading = page.locator('text="Nội dung có thể bị hạn chế"').first
+            if await modal_heading.count() == 0 or not await modal_heading.is_visible():
+                return
+
+        logger.info("Content warning modal detected — dismissing...")
+
+        # Strategy 1: aria-label Close button
+        for csel in [
+            '[aria-label="Close"]',
+            '[data-e2e="modal-close-inner-button"]',
+            'button[class*="close"]',
+            'button[class*="Close"]',
+        ]:
+            try:
+                btn = page.locator(csel).first
+                if await btn.count() > 0 and await btn.is_visible():
+                    await btn.click(force=True)
+                    await asyncio.sleep(1)
+                    logger.info(f"Content warning dismissed via {csel}")
+                    return
+            except Exception:
+                continue
+
+        # Strategy 2: JS — find the modal by heading text and click its close button
+        clicked = await page.evaluate("""() => {
+            const headings = Array.from(document.querySelectorAll('*'));
+            const heading = headings.find(el =>
+                el.textContent.trim() === 'Content may be restricted' ||
+                el.textContent.trim() === 'Nội dung có thể bị hạn chế'
+            );
+            if (!heading) return false;
+            const modal = heading.closest('[role="dialog"]') ||
+                          heading.closest('[class*="modal"]') ||
+                          heading.closest('[class*="Modal"]') ||
+                          heading.closest('[class*="Dialog"]') ||
+                          heading.parentElement?.parentElement?.parentElement;
+            if (!modal) return false;
+            // Find a close/X button — prefer aria-label=Close, else first button with × or svg
+            const closeBtn =
+                modal.querySelector('[aria-label="Close"]') ||
+                modal.querySelector('[aria-label="close"]') ||
+                modal.querySelector('button[class*="close"]') ||
+                modal.querySelector('button[class*="Close"]') ||
+                Array.from(modal.querySelectorAll('button')).find(b =>
+                    b.textContent.trim() === '×' || b.textContent.trim() === 'X' ||
+                    b.innerHTML.includes('<svg')
+                );
+            if (closeBtn) {
+                closeBtn.dispatchEvent(new MouseEvent('click', {bubbles: true, cancelable: true}));
+                return true;
+            }
+            return false;
+        }""")
+        if clicked:
+            await asyncio.sleep(1)
+            logger.info("Content warning dismissed via JS")
+        else:
+            # Strategy 3: press Escape to close modal
+            await page.keyboard.press("Escape")
+            await asyncio.sleep(1)
+            logger.info("Content warning dismissed via Escape key")
+
+    except Exception as e:
+        logger.warning(f"Could not dismiss content warning dialog: {e}")
+
+
 def _extract_cover_frame(video_path: str) -> Optional[str]:
     """Extract a single frame from the video to use as cover image."""
     import subprocess
@@ -411,6 +487,8 @@ async def post_video(video_path: str, caption: str, product_url: str = "", produ
         else:
             logger.warning("Content check did not complete within 12 minutes — proceeding anyway")
 
+        # Close the "Content may be restricted" modal if it appeared — it blocks the Post button
+        await _dismiss_content_warning_dialog(page)
         await asyncio.sleep(2)
 
         # --- Step 5b: Wait for Cover thumbnail to finish loading ---
