@@ -4,6 +4,7 @@ Supports Playwright cookie format by converting to Netscape format for yt-dlp.
 """
 import asyncio
 import json
+import logging
 import os
 import re
 import tempfile
@@ -13,6 +14,47 @@ from typing import Optional
 import yt_dlp
 
 from backend.config import settings
+
+logger = logging.getLogger(__name__)
+
+
+def extract_shop_product(item: dict) -> dict:
+    """Extract shop_product dict from a TikTok API item (anchors field or caption brackets)."""
+    # 1. Try anchors field (most accurate — direct product anchor embedded in video)
+    anchors = item.get("anchors") or []
+    for anchor in anchors:
+        goods = anchor.get("goods") or {}
+        name = (goods.get("goods_name") or goods.get("name") or "").strip()
+        gid  = str(goods.get("goods_id") or goods.get("id") or "").strip()
+        if name:
+            return {"id": gid, "name": name, "price": "", "image": "", "url": ""}
+        extra_str = anchor.get("extra") or ""
+        if extra_str:
+            try:
+                extra_data = json.loads(extra_str)
+                # TikTok anchor extra is a JSON array: [{"keyword":"...", "id":"...", "type":33}]
+                if isinstance(extra_data, list) and extra_data:
+                    first = extra_data[0]
+                    gid = str(first.get("id", "")).strip()
+                    keyword = first.get("keyword", "").strip()
+                    if gid or keyword:
+                        return {"id": gid, "name": keyword, "price": "", "image": "", "url": ""}
+                elif isinstance(extra_data, dict):
+                    name = (extra_data.get("goods_name") or extra_data.get("name") or extra_data.get("keyword") or "").strip()
+                    gid = str(extra_data.get("goods_id") or extra_data.get("id") or "").strip()
+                    if name or gid:
+                        return {"id": gid, "name": name, "price": "", "image": "", "url": ""}
+            except Exception:
+                pass
+
+    # 2. Fallback: bracket pattern [Product Name] in caption/description
+    # Handle multiple field names: yt-dlp uses "description", TikTok API uses "desc", tikwm uses "title"
+    desc = (item.get("desc") or item.get("description") or item.get("title") or "")
+    m = re.search(r'\[([^\[\]\n]{4,100})\]', desc)
+    if m:
+        return {"id": "", "name": m.group(1).strip(), "price": "", "image": "", "url": ""}
+
+    return {}
 
 
 def extract_product_url(caption: str) -> str:
@@ -34,11 +76,9 @@ def extract_product_url(caption: str) -> str:
             return url
     return ""
 
-COOKIES_FILE = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
-    "temp",
-    "tiktok_cookies.json",
-)
+def _get_cookies_file() -> str:
+    from backend.services.tiktok_browser import get_active_cookies_file
+    return get_active_cookies_file()
 
 
 def _playwright_cookies_to_netscape(cookies: list) -> str:
@@ -65,10 +105,10 @@ def _playwright_cookies_to_netscape(cookies: list) -> str:
 
 def _get_netscape_cookies_file() -> Optional[str]:
     """Load Playwright cookies and write to a temp Netscape file. Return path or None."""
-    if not os.path.exists(COOKIES_FILE):
+    if not os.path.exists(_get_cookies_file()):
         return None
     try:
-        with open(COOKIES_FILE) as f:
+        with open(_get_cookies_file()) as f:
             cookies = json.load(f)
         if not cookies:
             return None
@@ -93,10 +133,10 @@ async def _get_sec_uid_and_videos_via_api(profile_url: str) -> list:
     import httpx as _httpx
     import json as _json
 
-    if not os.path.exists(COOKIES_FILE):
+    if not os.path.exists(_get_cookies_file()):
         return []
 
-    with open(COOKIES_FILE) as f:
+    with open(_get_cookies_file()) as f:
         raw_cookies = _json.load(f)
 
     # Build cookie dict for httpx (only tiktok.com cookies)
@@ -177,25 +217,28 @@ async def _get_sec_uid_and_videos_via_api(profile_url: str) -> list:
                 "thumbnail": thumb,
                 "duration": int(duration),
                 "product_url": extract_product_url(desc),
+                "shop_product": extract_shop_product(item),
             })
         return videos
 
 
-async def _get_video_urls_playwright(profile_url: str) -> list:
+async def _get_video_urls_playwright(profile_url: str, max_count: int = 10) -> tuple:
     """Use Playwright to get video URLs + thumbnails from a TikTok profile page."""
     from playwright.async_api import async_playwright
     import json as _json
 
     cookies = None
-    if os.path.exists(COOKIES_FILE):
-        with open(COOKIES_FILE) as f:
+    if os.path.exists(_get_cookies_file()):
+        with open(_get_cookies_file()) as f:
             cookies = _json.load(f)
 
     video_items = []
+    total_count = 0
 
     async with async_playwright() as p:
         browser = await p.chromium.launch(
-            headless=True,
+            headless=False,
+            channel="chrome",  # real Chrome required — TikTok blocks headless
             args=["--disable-blink-features=AutomationControlled", "--no-sandbox"],
         )
         context = await browser.new_context(
@@ -211,27 +254,83 @@ async def _get_video_urls_playwright(profile_url: str) -> list:
         page = await context.new_page()
 
         # Intercept TikTok API to grab full video metadata
+        # Only capture from the user's actual post list (not repost/explore/etc.)
         captured = []
+        captured_with_anchors = []  # prefer items that have anchor data
 
         async def on_response(resp):
             url = resp.url
-            if any(k in url for k in ["item_list", "user/post", "aweme/v1/feed"]):
-                try:
-                    data = await resp.json()
-                    items = (
-                        data.get("itemList")
-                        or data.get("items")
-                        or data.get("aweme_list")
-                        or []
-                    )
-                    captured.extend(items)
-                except Exception:
-                    pass
+            # Only the profile's own post list has reliable anchor data
+            is_post_list = (
+                ("api/post/item_list" in url and "repost" not in url)
+                or ("user/post" in url)
+                or ("aweme/v1/feed" in url)
+            )
+            if not is_post_list:
+                return
+            try:
+                body = await resp.body()
+                if not body:
+                    return
+                data = await resp.json()
+                items = (
+                    data.get("itemList")
+                    or data.get("items")
+                    or data.get("aweme_list")
+                    or []
+                )
+                for item in items:
+                    anchors = item.get("anchors") or []
+                    if anchors:
+                        captured_with_anchors.append(item)
+                    captured.append(item)
+            except Exception:
+                pass
 
         page.on("response", on_response)
 
+        # Navigate to homepage first to warm up the session (reduces captcha frequency)
+        try:
+            await page.goto("https://www.tiktok.com/", wait_until="domcontentloaded", timeout=15000)
+            await asyncio.sleep(2)
+        except Exception:
+            pass
+
         try:
             await page.goto(profile_url, wait_until="domcontentloaded", timeout=30000)
+        except Exception:
+            pass
+
+        # Detect captcha — wait up to 90s for user to solve it before giving up
+        await asyncio.sleep(2)
+        try:
+            captcha_visible = await page.evaluate("""() => {
+                const texts = ['Drag the slider', 'fit the puzzle'];
+                return texts.some(t => document.body.innerText.includes(t));
+            }""")
+            if captcha_visible:
+                logger.warning("TikTok CAPTCHA detected — waiting up to 90s for user to solve it in the browser window...")
+                for _ in range(45):
+                    await asyncio.sleep(2)
+                    try:
+                        still_captcha = await page.evaluate("""() => {
+                            return ['Drag the slider', 'fit the puzzle'].some(t => document.body.innerText.includes(t));
+                        }""")
+                        if not still_captcha:
+                            logger.info("CAPTCHA solved — reloading page to capture video data")
+                            await asyncio.sleep(1)
+                            try:
+                                await page.reload(wait_until="domcontentloaded", timeout=25000)
+                            except Exception:
+                                pass
+                            await asyncio.sleep(4)
+                            break
+                    except Exception:
+                        break
+                else:
+                    logger.warning("CAPTCHA not solved in 90s — skipping Playwright fetch")
+                    await browser.close()
+                    return []
         except Exception:
             pass
 
@@ -240,8 +339,89 @@ async def _get_video_urls_playwright(profile_url: str) -> list:
         await page.evaluate("window.scrollTo(0, document.body.scrollHeight / 3)")
         await asyncio.sleep(3)
 
-        if captured:
-            for item in captured[:10]:
+        # In-page fetch fallback: if response intercept captured nothing (rate-limited),
+        # call TikTok API via fetch() from inside the real Chrome context.
+        # The browser carries the user's session cookies + proper headers, so TikTok
+        # treats it as a legitimate user request rather than a bot.
+        if not captured:
+            logger.info("Response intercept captured 0 items — trying in-page fetch fallback...")
+            try:
+                page_data = await page.evaluate("""() => {
+                    let secUid = '', videoCount = 0;
+                    try {
+                        const s = document.getElementById('__UNIVERSAL_DATA_FOR_REHYDRATION__');
+                        if (s) {
+                            const d = JSON.parse(s.textContent);
+                            const scope = d['__DEFAULT_SCOPE__'] || {};
+                            const userDetail = scope['webapp.user-detail'] || {};
+                            const userInfo = userDetail['userInfo'] || {};
+                            secUid = (userInfo['user'] || {}).secUid || '';
+                            videoCount = (userInfo['stats'] || {}).videoCount || 0;
+                        }
+                    } catch(e) {}
+                    if (!secUid) {
+                        try {
+                            const n = document.getElementById('__NEXT_DATA__');
+                            if (n) {
+                                const d = JSON.parse(n.textContent);
+                                secUid = d.props?.pageProps?.userInfo?.user?.secUid || '';
+                                videoCount = d.props?.pageProps?.userInfo?.stats?.videoCount || videoCount;
+                            }
+                        } catch(e) {}
+                    }
+                    if (!secUid) {
+                        try {
+                            const sig = window['__sigi_state__'] || window['SIGI_STATE'];
+                            if (sig) {
+                                const users = sig.UserModule?.users || {};
+                                const key = Object.keys(users)[0];
+                                if (key) {
+                                    secUid = users[key].secUid || '';
+                                    videoCount = sig.UserModule?.stats?.[key]?.videoCount || videoCount;
+                                }
+                            }
+                        } catch(e) {}
+                    }
+                    return { secUid, videoCount };
+                }""")
+                sec_uid = page_data.get('secUid', '') if page_data else ''
+                if page_data and page_data.get('videoCount'):
+                    total_count = int(page_data['videoCount'])
+                    logger.info(f"Profile total video count: {total_count}")
+                if sec_uid:
+                    logger.info(f"secUid extracted: {sec_uid[:30]}... — calling item_list in-page")
+                    result = await page.evaluate("""async ([secUid, maxCount]) => {
+                        try {
+                            const resp = await fetch(
+                                'https://www.tiktok.com/api/post/item_list/?aid=1988&count=' + maxCount +
+                                '&secUid=' + encodeURIComponent(secUid) +
+                                '&cursor=0&app_name=tiktok_web&device_platform=web_pc',
+                                {credentials: 'include'}
+                            );
+                            return await resp.json();
+                        } catch(e) {
+                            return null;
+                        }
+                    }""", [sec_uid, max_count])
+                    if result and result.get("itemList"):
+                        new_items = result["itemList"]
+                        logger.info(f"In-page fetch: {len(new_items)} items")
+                        for item in new_items:
+                            captured.append(item)
+                            if item.get("anchors"):
+                                captured_with_anchors.append(item)
+                    else:
+                        logger.warning(f"In-page fetch returned no itemList (result keys: {list((result or {}).keys())})")
+                else:
+                    logger.warning("Could not extract secUid from page DOM — skipping in-page fetch")
+            except Exception as _e:
+                logger.debug(f"In-page fetch error: {_e}")
+
+        # Prefer items that have anchor data (product links)
+        items_to_use = captured_with_anchors if captured_with_anchors else captured
+        logger.info(f"Playwright: {len(captured)} total, {len(captured_with_anchors)} with anchors")
+        if items_to_use:
+            for item in items_to_use[:max_count]:
                 vid_id = item.get("id") or item.get("aweme_id", "")
                 author = item.get("author") or {}
                 username = author.get("uniqueId") or author.get("unique_id") or "user"
@@ -263,6 +443,7 @@ async def _get_video_urls_playwright(profile_url: str) -> list:
                     "thumbnail": thumb,
                     "duration": int(duration),
                     "product_url": extract_product_url(desc),
+                    "shop_product": extract_shop_product(item),
                 })
         else:
             # DOM fallback: extract video links and thumbnails
@@ -293,12 +474,12 @@ async def _get_video_urls_playwright(profile_url: str) -> list:
                     "duration": 0,
                     "product_url": "",
                 })
-                if len(video_items) >= 10:
+                if len(video_items) >= max_count:
                     break
 
         await browser.close()
 
-    return video_items[:10]
+    return video_items[:max_count], total_count
 
 
 async def _enrich_with_ytdlp(video_items: list) -> list:
@@ -384,12 +565,13 @@ async def _get_video_meta_tikwm(video_url: str) -> Optional[dict]:
             "thumbnail": thumb,
             "duration": duration,
             "product_url": extract_product_url(desc),
+            "shop_product": extract_shop_product(d),
         }
     except Exception:
         return None
 
 
-async def _get_profile_videos_tikwm(profile_url: str) -> list:
+async def _get_profile_videos_tikwm(profile_url: str, max_count: int = 10) -> list:
     """Get profile videos via tikwm.com API (fallback when yt-dlp fails)."""
     import httpx as _httpx
     # Extract username from URL
@@ -401,7 +583,7 @@ async def _get_profile_videos_tikwm(profile_url: str) -> list:
         async with _httpx.AsyncClient(timeout=20) as client:
             resp = await client.get(
                 f"https://www.tikwm.com/api/user/posts",
-                params={"unique_id": username, "count": "10", "cursor": "0"},
+                params={"unique_id": username, "count": str(max_count), "cursor": "0"},
                 headers={"User-Agent": "Mozilla/5.0"},
             )
             data = resp.json()
@@ -409,7 +591,7 @@ async def _get_profile_videos_tikwm(profile_url: str) -> list:
             return []
         items = data.get("data", {}).get("videos") or []
         videos = []
-        for d in items[:10]:
+        for d in items[:max_count]:
             vid_id = str(d.get("video_id") or d.get("id") or "")
             url = f"https://www.tiktok.com/@{username}/video/{vid_id}"
             desc = d.get("title") or ""
@@ -423,14 +605,15 @@ async def _get_profile_videos_tikwm(profile_url: str) -> list:
                 "thumbnail": thumb,
                 "duration": duration,
                 "product_url": extract_product_url(desc),
+                "shop_product": extract_shop_product(d),
             })
         return videos
     except Exception:
         return []
 
 
-async def get_profile_videos(profile_url: str) -> list:
-    """Fetch up to 10 most recent videos from a TikTok profile."""
+async def get_profile_videos(profile_url: str, max_count: int = 10) -> tuple:
+    """Fetch up to max_count most recent videos from a TikTok profile. Returns (videos, total_count)."""
     loop = asyncio.get_event_loop()
 
     # Capture video IDs that yt-dlp finds during extraction
@@ -452,7 +635,7 @@ async def get_profile_videos(profile_url: str) -> list:
             "quiet": True,
             "no_warnings": True,
             "extract_flat": True,
-            "playlist_items": "1-10",
+            "playlist_items": f"1-{max_count}",
             "ignoreerrors": True,
             "socket_timeout": 30,
             "retries": 3,
@@ -475,7 +658,7 @@ async def get_profile_videos(profile_url: str) -> list:
 
         entries = info.get("entries") or []
         videos = []
-        for entry in entries[:10]:
+        for entry in entries[:max_count]:
             if not entry:
                 continue
             vid_id = entry.get("id", "")
@@ -505,18 +688,64 @@ async def get_profile_videos(profile_url: str) -> list:
                 "thumbnail": thumbnail,
                 "duration": int(entry.get("duration") or 0),
                 "product_url": extract_product_url(desc),
+                "shop_product": extract_shop_product(entry),
             })
         return videos
 
-    videos = await loop.run_in_executor(None, _fetch)
+    # Run yt-dlp AND Playwright browser-intercept in parallel
+    # yt-dlp: fast, gets captions/thumbnails but NO anchor data
+    # Playwright: slower but intercepts real TikTok API → has anchors.goods.goods_name
+    ydlp_result, pw_result = await asyncio.gather(
+        loop.run_in_executor(None, _fetch),
+        _get_video_urls_playwright(profile_url, max_count),
+        return_exceptions=True,
+    )
+    if isinstance(ydlp_result, Exception):
+        ydlp_result = []
+    if isinstance(pw_result, Exception):
+        pw_result = ([], 0)
+
+    playwright_result, total_count = pw_result if isinstance(pw_result, tuple) else (pw_result or [], 0)
+    logger.info(f"yt-dlp: {len(ydlp_result)} videos, playwright: {len(playwright_result)} videos, total: {total_count}")
+
+    videos = list(ydlp_result) if ydlp_result else []
+
+    # Enrich yt-dlp results with anchor product data from Playwright intercept
+    if playwright_result:
+        pw_by_id = {v["id"]: v for v in playwright_result}
+        for v in videos:
+            pw_v = pw_by_id.get(v["id"])
+            if pw_v:
+                pw_sp = pw_v.get("shop_product") or {}
+                if pw_sp.get("id") or pw_sp.get("name"):
+                    v["shop_product"] = pw_sp
+                    logger.info(f"  Enriched video {v['id']} shop_product: id={pw_sp.get('id')}, name={pw_sp.get('name', '')[:40]}")
+        if not videos:
+            videos = list(playwright_result)
+
+    # Enrich shop_product.name from showcase cache when product ID is known
+    try:
+        from backend.services.product_service import get_cached_products
+        cached_by_id = {p["id"]: p for p in get_cached_products() if p.get("id")}
+        for v in videos:
+            sp = v.get("shop_product") or {}
+            sp_id = sp.get("id", "")
+            if sp_id and cached_by_id.get(sp_id):
+                full_name = (cached_by_id[sp_id].get("name") or "").strip()
+                if full_name:
+                    sp["name"] = full_name
+                    v["shop_product"] = sp
+                    logger.info(f"  Showcase name enriched: {full_name[:60]}")
+    except Exception:
+        pass
 
     if videos:
-        return videos
+        return videos, total_count
 
-    # yt-dlp playlist extraction failed — try tikwm.com API first
-    videos = await _get_profile_videos_tikwm(profile_url)
+    # Try tikwm.com API fallback
+    videos = await _get_profile_videos_tikwm(profile_url, max_count)
     if videos:
-        return videos
+        return videos, total_count
 
     # Last resort: use captured video IDs from yt-dlp logs + tikwm metadata
     if captured_ids:
@@ -524,12 +753,12 @@ async def get_profile_videos(profile_url: str) -> list:
         username = m.group(1) if m else "user"
         tasks = [
             _get_video_meta_tikwm(f"https://www.tiktok.com/@{username}/video/{vid_id}")
-            for vid_id in captured_ids[:10]
+            for vid_id in captured_ids[:max_count]
         ]
         results = await asyncio.gather(*tasks, return_exceptions=True)
         videos = [r for r in results if isinstance(r, dict)]
         if videos:
-            return videos
+            return videos, total_count
 
     raise RuntimeError(
         "Không lấy được video. Kiểm tra lại link profile (dạng https://www.tiktok.com/@username)"
@@ -542,8 +771,8 @@ async def _UNUSED_get_profile_videos_playwright(profile_url: str) -> list:
     import json as _json
 
     cookies = []
-    if os.path.exists(COOKIES_FILE):
-        with open(COOKIES_FILE) as f:
+    if os.path.exists(_get_cookies_file()):
+        with open(_get_cookies_file()) as f:
             cookies = _json.load(f)
 
     async with async_playwright() as p:
@@ -635,6 +864,7 @@ async def _UNUSED_get_profile_videos_playwright(profile_url: str) -> list:
                         "caption": desc, "thumbnail": thumb,
                         "duration": int(duration),
                         "product_url": extract_product_url(desc),
+                        "shop_product": extract_shop_product(item),
                     })
 
         if not videos:
@@ -657,6 +887,7 @@ async def _UNUSED_get_profile_videos_playwright(profile_url: str) -> list:
                     "title": "Video TikTok", "caption": "",
                     "thumbnail": item.get("thumb", ""),
                     "duration": 0, "product_url": "",
+                    "shop_product": {},
                 })
 
         await browser.close()
@@ -716,8 +947,22 @@ def _convert_to_h264(src_path: str, dst_path: str) -> bool:
         return False
 
 
+def _has_video_stream(path: str) -> bool:
+    """Return True if the file has at least one video stream."""
+    import subprocess
+    try:
+        result = subprocess.run(
+            ["ffprobe", "-v", "quiet", "-select_streams", "v:0",
+             "-show_entries", "stream=codec_name", "-of", "default=nw=1:nk=1", path],
+            capture_output=True, text=True, timeout=15,
+        )
+        return bool(result.stdout.strip())
+    except Exception:
+        return False
+
+
 def _needs_h264_conversion(path: str) -> bool:
-    """Return True if the video is not H.264 (e.g. HEVC/H.265)."""
+    """Return True if the video stream exists but is not H.264 (e.g. HEVC/H.265)."""
     import subprocess
     try:
         result = subprocess.run(
@@ -726,7 +971,10 @@ def _needs_h264_conversion(path: str) -> bool:
             capture_output=True, text=True, timeout=15,
         )
         codec = result.stdout.strip().lower()
-        return codec not in ("h264", "avc", "")
+        # Empty = no video stream → do NOT treat as h264; that case is handled by _has_video_stream
+        if not codec:
+            return False
+        return codec not in ("h264", "avc")
     except Exception:
         return False
 
@@ -774,19 +1022,26 @@ async def download_video(video_url: str) -> str:
         return False
 
     # Try yt-dlp first
+    ytdlp_ok = False
     try:
         ok = await loop.run_in_executor(None, _download_ytdlp)
-        if ok and os.path.exists(final_path):
-            pass  # fall through to H.264 check below
-        else:
-            raise RuntimeError("yt-dlp download failed")
-    except Exception:
+        if ok and os.path.exists(final_path) and _has_video_stream(final_path):
+            ytdlp_ok = True
+        elif os.path.exists(final_path):
+            logger.warning(f"yt-dlp produced a file with no video stream — falling back to tikwm: {final_path}")
+            os.remove(final_path)
+    except Exception as e:
+        logger.warning(f"yt-dlp download error: {e}")
+
+    if not ytdlp_ok:
         # Fallback: tikwm.com API
         ok = await _download_via_api(clean_url, final_path)
-        if not ok:
+        if not ok or not os.path.exists(final_path):
             raise RuntimeError(f"Tải video thất bại. Video có thể bị hạn chế hoặc đã bị xoá: {clean_url}")
+        if not _has_video_stream(final_path):
+            raise RuntimeError(f"File tải về không có video stream (audio only): {clean_url}")
 
-    # Convert to H.264 if needed (tikwm often returns HEVC which can't be viewed/uploaded reliably)
+    # Convert to H.264 if needed (tikwm often returns HEVC which TikTok Studio may reject)
     if _needs_h264_conversion(final_path):
         h264_path = os.path.join(settings.TEMP_DIR, f"dl_{file_id}_h264.mp4")
         converted = await loop.run_in_executor(None, _convert_to_h264, final_path, h264_path)

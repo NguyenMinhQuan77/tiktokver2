@@ -1,0 +1,12 @@
+[
+  {
+    "handle": "your.tiktok.handle",
+    "username": "your_email@gmail.com",
+    "password": "your_password"
+  },
+  {
+    "handle": "second.account",
+    "username": "second_email@gmail.com",
+    "password": "second_password"
+  }
+]

@@ -2,6 +2,7 @@
 Product service: fetch TikTok Shop showcase products from TikTok Studio.
 """
 import asyncio
+import json as _json
 import logging
 import os
 from typing import List
@@ -10,10 +11,41 @@ logger = logging.getLogger(__name__)
 
 _products_cache: List[dict] = []
 
-COOKIES_FILE = os.path.join(
+def _get_cookies_file() -> str:
+    from backend.services.tiktok_browser import get_active_cookies_file
+    return get_active_cookies_file()
+_PRODUCTS_CACHE_FILE = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
-    "temp", "tiktok_cookies.json",
+    "temp", "showcase_products_cache.json",
 )
+
+
+def _load_cache_from_file():
+    """Load persisted showcase products from disk on startup."""
+    global _products_cache
+    try:
+        if os.path.exists(_PRODUCTS_CACHE_FILE):
+            with open(_PRODUCTS_CACHE_FILE) as f:
+                data = _json.load(f)
+            if isinstance(data, list) and data:
+                _products_cache = data
+                logger.info(f"Loaded {len(_products_cache)} showcase products from cache file")
+    except Exception:
+        pass
+
+
+def _save_cache_to_file(products: list):
+    """Persist showcase products to disk."""
+    try:
+        os.makedirs(os.path.dirname(_PRODUCTS_CACHE_FILE), exist_ok=True)
+        with open(_PRODUCTS_CACHE_FILE, "w") as f:
+            _json.dump(products, f, ensure_ascii=False)
+    except Exception:
+        pass
+
+
+# Auto-load from file when the module is first imported
+_load_cache_from_file()
 
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -28,10 +60,10 @@ def get_cached_products() -> List[dict]:
 
 def _load_cookies():
     import json
-    if not os.path.exists(COOKIES_FILE):
+    if not os.path.exists(_get_cookies_file()):
         return None
     try:
-        with open(COOKIES_FILE) as f:
+        with open(_get_cookies_file()) as f:
             return json.load(f)
     except Exception:
         return None
@@ -39,7 +71,7 @@ def _load_cookies():
 
 def _find_small_video() -> str:
     """Find a small existing MP4 in temp to use as dummy upload."""
-    temp_dir = os.path.dirname(COOKIES_FILE)
+    temp_dir = os.path.dirname(_get_cookies_file())
     candidates = []
     for f in os.listdir(temp_dir):
         if f.endswith(".mp4"):
@@ -93,9 +125,34 @@ async def fetch_products() -> List[dict]:
                 raise RuntimeError("Không vào được TikTok Studio — kiểm tra đăng nhập.")
             await file_input.set_input_files(dummy_video)
 
-            # Wait for upload form (caption box)
+            # Wait for upload form (caption box) — dismiss popups/overlays on every iteration
+            popup_selectors = [
+                'button:has-text("Got it")', 'button:has-text("Đã hiểu")',
+                'button:has-text("OK")', '[aria-label="Close"]',
+                '[data-e2e="modal-close-inner-button"]',
+            ]
             caption_ready = False
-            for _ in range(30):
+            for _ in range(40):
+                # Dismiss react-joyride tutorial overlay (blocks all clicks in TikTok Studio)
+                try:
+                    overlay = page.locator('[data-test-id="overlay"]').first
+                    if await overlay.count() > 0 and await overlay.is_visible():
+                        await overlay.click(force=True)
+                        await asyncio.sleep(0.5)
+                except Exception:
+                    pass
+                try:
+                    await page.keyboard.press("Escape")
+                except Exception:
+                    pass
+                for sel in popup_selectors:
+                    try:
+                        btn = page.locator(sel).first
+                        if await btn.count() > 0 and await btn.is_visible():
+                            await btn.click(force=True)
+                            await asyncio.sleep(0.5)
+                    except Exception:
+                        pass
                 await asyncio.sleep(3)
                 el = page.locator('div[contenteditable="true"]').first
                 if await el.count() > 0 and await el.is_visible():
@@ -105,27 +162,45 @@ async def fetch_products() -> List[dict]:
             if not caption_ready:
                 raise RuntimeError("Form upload không xuất hiện.")
 
-            # Dismiss any popups
-            for sel in ['button:has-text("Got it")', 'button:has-text("Đã hiểu")', '[aria-label="Close"]']:
-                try:
-                    btn = page.locator(sel).first
-                    if await btn.count() > 0 and await btn.is_visible():
-                        await btn.click()
-                        await asyncio.sleep(0.5)
-                except Exception:
-                    pass
+            # Click "+ Add" / "Add link" button — dismiss joyride overlay first
+            try:
+                overlay = page.locator('[data-test-id="overlay"]').first
+                if await overlay.count() > 0:
+                    await overlay.click(force=True)
+                    await asyncio.sleep(1)
+            except Exception:
+                pass
+            try:
+                await page.keyboard.press("Escape")
+                await asyncio.sleep(0.5)
+            except Exception:
+                pass
 
-            # Click "+ Add" in the "Add link" section
-            add_btn = page.locator('text="+ Add"').first
-            if await add_btn.count() == 0:
+            add_btn = None
+            for add_sel in ['text="+ Add"', 'text="Add"', ':text("+ Add")', ':text("Add link")']:
+                btn = page.locator(add_sel).first
+                if await btn.count() > 0 and await btn.is_visible():
+                    add_btn = btn
+                    break
+            if add_btn is None:
                 raise RuntimeError("Không tìm thấy nút '+ Add'.")
-            await add_btn.click()
+            await add_btn.click(force=True)
             await asyncio.sleep(2)
 
+            # Some TikTok Studio versions show a "Next" step in the add-link dialog
+            for next_sel in ['button:has-text("Next")', 'button:has-text("Tiếp theo")']:
+                btn = page.locator(next_sel).first
+                if await btn.count() > 0 and await btn.is_visible():
+                    await btn.click()
+                    await asyncio.sleep(2)
+                    break
+
             # Click "Showcase products" tab
-            showcase_tab = page.locator('text="Showcase products"').first
-            if await showcase_tab.count() > 0:
-                await showcase_tab.click()
+            for tab_sel in ['text="Showcase products"', ':text("Showcase products")', ':text("Sản phẩm giới thiệu")']:
+                showcase_tab = page.locator(tab_sel).first
+                if await showcase_tab.count() > 0 and await showcase_tab.is_visible():
+                    await showcase_tab.click()
+                    break
             await asyncio.sleep(3)
 
             # Parse all pages of products
@@ -170,6 +245,7 @@ async def fetch_products() -> List[dict]:
 
     if products:
         _products_cache = products
+        _save_cache_to_file(products)
 
     return products
 

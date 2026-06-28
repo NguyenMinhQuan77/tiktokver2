@@ -488,6 +488,25 @@
       <span class="font-black text-base" style="color:#fff">TikTok <span style="color:#FE2C55">Affiliate</span> Tool</span>
     </div>
     <div class="flex items-center gap-3">
+      <!-- Account switcher -->
+      <div style="position:relative">
+        <button id="account-switcher-btn" onclick="toggleAccountMenu()"
+                style="display:flex;align-items:center;gap:6px;background:#1a1a1a;border:1px solid #333;border-radius:8px;padding:6px 12px;cursor:pointer;font-size:13px;color:#f1f1f1;transition:border-color .2s"
+                onmouseover="this.style.borderColor='#FE2C55'" onmouseout="this.style.borderColor='#333'">
+          <span style="width:8px;height:8px;border-radius:50%;background:#888;flex-shrink:0" id="account-dot"></span>
+          <span id="account-switcher-label">@—</span>
+          <svg width="10" height="10" viewBox="0 0 10 10" fill="currentColor" style="opacity:.5"><path d="M1 3l4 4 4-4"/></svg>
+        </button>
+        <div id="account-menu" style="display:none;position:absolute;right:0;top:calc(100% + 6px);background:#1a1a1a;border:1px solid #2e2e2e;border-radius:10px;min-width:220px;z-index:999;overflow:hidden;box-shadow:0 8px 24px rgba(0,0,0,.5)">
+          <div style="padding:8px 12px 6px;font-size:11px;color:#555;text-transform:uppercase;letter-spacing:.05em">Chọn tài khoản</div>
+          <div id="account-menu-items"></div>
+          <div style="border-top:1px solid #222;padding:8px">
+            <button onclick="handleLoginForActive()" style="width:100%;background:#FE2C55;border:none;color:#fff;border-radius:6px;padding:7px;font-size:12px;font-weight:600;cursor:pointer">
+              + Đăng nhập tài khoản đang chọn
+            </button>
+          </div>
+        </div>
+      </div>
       <div id="user-avatar" class="avatar-circle">T</div>
       <span id="user-name" class="text-sm text-gray-300 font-medium hidden sm:block"></span>
       <button onclick="handleLogout()"
@@ -512,17 +531,46 @@
     <!-- Fetch section -->
     <div class="card">
       <div class="section-title mb-1">Lấy video từ profile TikTok</div>
-      <div class="section-sub mb-4">Nhập link profile để lấy 10 video mới nhất</div>
-      <div class="flex gap-3">
+      <div class="section-sub mb-3">Nhập link profile, kiểm tra tổng số video, rồi nhập số lượng muốn lấy</div>
+
+      <!-- Row 1: URL + nút kiểm tra -->
+      <div class="flex gap-3 mb-3">
         <input
           id="profile-url"
           type="url"
           class="input-field"
           placeholder="https://www.tiktok.com/@username"
-          onkeydown="if(event.key==='Enter')fetchVideos()"
+          onkeydown="if(event.key==='Enter')checkProfileCount()"
         />
+        <button id="check-count-btn" class="btn-primary" onclick="checkProfileCount()" style="flex-shrink:0;background:linear-gradient(135deg,#25F4EE,#1ac8c3);color:#000">
+          <span id="check-count-text">Kiểm tra</span>
+          <span id="check-count-spinner" class="spinner" style="display:none"></span>
+        </button>
+      </div>
+
+      <!-- Tổng số video (hiện sau khi kiểm tra) -->
+      <div id="profile-count-banner" style="display:none;background:#1a1a1a;border:1px solid #2e2e2e;border-radius:8px;padding:10px 14px;margin-bottom:12px;display:none;align-items:center;gap:10px">
+        <span style="color:#25F4EE;font-size:18px">📊</span>
+        <span id="profile-count-text" style="color:#f1f1f1;font-size:14px"></span>
+      </div>
+
+      <!-- Row 2: Số video cần lấy + nút lấy -->
+      <div class="flex gap-3">
+        <div style="display:flex;align-items:center;gap:8px;flex-shrink:0">
+          <label style="color:#888;font-size:13px;white-space:nowrap">Số video muốn lấy:</label>
+          <input
+            id="video-count-input"
+            type="number"
+            min="1"
+            max="200"
+            value="10"
+            class="input-field"
+            style="width:80px;text-align:center"
+            onkeydown="if(event.key==='Enter')fetchVideos()"
+          />
+        </div>
         <button id="fetch-btn" class="btn-primary" onclick="fetchVideos()">
-          <span id="fetch-btn-text">Lấy 10 video</span>
+          <span id="fetch-btn-text">Lấy video</span>
           <span id="fetch-spinner" class="spinner" style="display:none"></span>
         </button>
       </div>
@@ -605,6 +653,8 @@ const state = {
   affiliateLinks: {},      // id -> affiliate url string (manual URL mode)
   selectedProduct: {},     // id -> product_id string (showcase mode)
   attachLink: {},          // id -> bool: whether to attach product link
+  attachMode: {},          // id -> 'shop'|'showcase'|'url'  (which mode active)
+  shopProduct: {},         // id -> shop_product dict (from source video anchor)
   delayMinutes: {},        // id -> delay in minutes
   products: [],            // [{id, name, price, image}] from TikTok Shop showcase
   productsLoading: false,
@@ -615,7 +665,78 @@ const state = {
 // ── Bootstrap ───────────────────────────────────────────────────────────────
 window.addEventListener('DOMContentLoaded', () => {
   checkAuthStatus();
+  loadAccountList();
 });
+
+// ── Account switcher ────────────────────────────────────────────────────────
+let _accountMenuOpen = false;
+
+async function loadAccountList() {
+  try {
+    const res = await fetch('/auth/accounts');
+    const data = await res.json();
+    renderAccountMenu(data.accounts, data.active_handle);
+  } catch {}
+}
+
+function renderAccountMenu(accounts, activeHandle) {
+  const label = document.getElementById('account-switcher-label');
+  const dot = document.getElementById('account-dot');
+  const items = document.getElementById('account-menu-items');
+  if (!label || !items) return;
+
+  const active = accounts.find(a => a.handle === activeHandle) || accounts[0];
+  if (active) {
+    label.textContent = '@' + active.handle;
+    dot.style.background = active.logged_in ? '#00c853' : '#ff5252';
+  }
+
+  items.innerHTML = accounts.map(acc => `
+    <div onclick="switchAccount('${acc.handle}')"
+         style="display:flex;align-items:center;gap:10px;padding:9px 12px;cursor:pointer;transition:background .15s;${acc.handle === activeHandle ? 'background:#222' : ''}"
+         onmouseover="this.style.background='#222'" onmouseout="this.style.background='${acc.handle === activeHandle ? '#222' : 'transparent'}'">
+      <span style="width:8px;height:8px;border-radius:50%;flex-shrink:0;background:${acc.logged_in ? '#00c853' : '#ff5252'}"></span>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:13px;font-weight:600;color:#f1f1f1">@${escHtml(acc.handle)}</div>
+        <div style="font-size:11px;color:#666;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(acc.username)}</div>
+      </div>
+      ${acc.handle === activeHandle ? '<span style="font-size:10px;color:#FE2C55;font-weight:700">ĐANG DÙNG</span>' : ''}
+    </div>
+  `).join('');
+}
+
+function toggleAccountMenu() {
+  const menu = document.getElementById('account-menu');
+  _accountMenuOpen = !_accountMenuOpen;
+  menu.style.display = _accountMenuOpen ? 'block' : 'none';
+  if (_accountMenuOpen) loadAccountList();
+}
+
+document.addEventListener('click', e => {
+  if (!e.target.closest('#account-switcher-btn') && !e.target.closest('#account-menu')) {
+    document.getElementById('account-menu').style.display = 'none';
+    _accountMenuOpen = false;
+  }
+});
+
+async function switchAccount(handle) {
+  await fetch('/auth/switch', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ handle }),
+  });
+  document.getElementById('account-menu').style.display = 'none';
+  _accountMenuOpen = false;
+  await loadAccountList();
+  showToast(`Đã chuyển sang @${handle}`, 'success');
+  checkAuthStatus();
+}
+
+async function handleLoginForActive() {
+  document.getElementById('account-menu').style.display = 'none';
+  _accountMenuOpen = false;
+  await handleLogin();
+}
 
 // ── Auth ────────────────────────────────────────────────────────────────────
 async function checkAuthStatus() {
@@ -648,7 +769,11 @@ async function handleLogin() {
   errBox.classList.add('hidden');
 
   try {
-    const res = await fetch('/auth/connect', { method: 'POST' });
+    const res = await fetch('/auth/connect', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ handle: '' }),
+    });
     const data = await res.json();
     if (data.error) throw new Error(data.error);
 
@@ -745,9 +870,50 @@ function switchTab(tab) {
 }
 
 // ── Fetch videos ─────────────────────────────────────────────────────────────
+async function checkProfileCount() {
+  const url = document.getElementById('profile-url').value.trim();
+  if (!url) { showToast('Vui lòng nhập link profile TikTok', 'error'); return; }
+
+  const btn = document.getElementById('check-count-btn');
+  const btnText = document.getElementById('check-count-text');
+  const spinner = document.getElementById('check-count-spinner');
+  btn.disabled = true;
+  btnText.textContent = 'Đang kiểm tra...';
+  spinner.style.display = 'inline-block';
+
+  try {
+    const res = await fetch('/profile/count', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'Lỗi kiểm tra');
+
+    const total = data.total_count || 0;
+    const banner = document.getElementById('profile-count-banner');
+    const countText = document.getElementById('profile-count-text');
+    banner.style.display = 'flex';
+    if (total > 0) {
+      countText.innerHTML = `Profile này có tổng <strong style="color:#25F4EE">${total}</strong> video — nhập số video muốn lấy (tối đa ${total})`;
+      document.getElementById('video-count-input').max = total;
+    } else {
+      countText.textContent = 'Không đọc được tổng số video — nhập số bạn muốn lấy';
+    }
+  } catch (e) {
+    showToast(e.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btnText.textContent = 'Kiểm tra';
+    spinner.style.display = 'none';
+  }
+}
+
 async function fetchVideos() {
   const url = document.getElementById('profile-url').value.trim();
   if (!url) { showToast('Vui lòng nhập link profile TikTok', 'error'); return; }
+
+  const maxCount = parseInt(document.getElementById('video-count-input').value) || 10;
 
   const btn = document.getElementById('fetch-btn');
   const btnText = document.getElementById('fetch-btn-text');
@@ -760,7 +926,7 @@ async function fetchVideos() {
     const res = await fetch('/profile/videos', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url }),
+      body: JSON.stringify({ url, max_count: maxCount }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail || 'Lỗi lấy video');
@@ -773,15 +939,29 @@ async function fetchVideos() {
 
     renderVideoGrid();
     document.getElementById('video-grid-section').style.display = 'block';
-    document.getElementById('video-count-label').textContent =
-      `Tìm thấy ${state.videos.length} video`;
+
+    const totalCount = data.total_count || 0;
+    let countLabel = `Đang hiển thị ${state.videos.length} video`;
+    if (totalCount > 0) {
+      countLabel += ` / tổng ${totalCount} video`;
+    }
+    document.getElementById('video-count-label').textContent = countLabel;
+    // Update banner if total was fetched from server
+    if (totalCount > 0) {
+      const banner = document.getElementById('profile-count-banner');
+      const countText = document.getElementById('profile-count-text');
+      banner.style.display = 'flex';
+      countText.innerHTML = `Profile này có tổng <strong style="color:#25F4EE">${totalCount}</strong> video — đang hiển thị <strong>${state.videos.length}</strong> video`;
+      document.getElementById('video-count-input').max = totalCount;
+    }
+
     updateActionBar();
     showToast(`Lấy được ${state.videos.length} video!`, 'success');
   } catch (e) {
     showToast(e.message, 'error');
   } finally {
     btn.disabled = false;
-    btnText.textContent = 'Lấy 10 video';
+    btnText.textContent = 'Lấy video';
     spinner.style.display = 'none';
   }
 }
@@ -824,17 +1004,32 @@ function buildVideoCard(v, idx) {
       <div class="card-caption">${escHtml(v.caption || '(Không có caption)')}</div>
     </div>
     <div class="card-inputs" id="inputs-${v.id}" style="display:none">
-      <div style="display:flex;gap:8px;margin-bottom:6px">
+      <div style="display:flex;gap:6px;margin-bottom:6px;flex-wrap:wrap">
+        <button
+          id="btn-shop-${v.id}"
+          onclick="setAttachMode('${v.id}','shop',event)"
+          style="flex:1;min-width:70px;padding:6px 4px;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer;border:1.5px solid #FF8C00;background:#FF8C00;color:#fff;transition:all .2s"
+        >🏷️ SP gốc</button>
         <button
           id="btn-attach-${v.id}"
-          onclick="setAttachLink('${v.id}', true, event)"
-          style="flex:1;padding:6px 4px;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;border:1.5px solid #FE2C55;background:#FE2C55;color:#fff;transition:all .2s"
+          onclick="setAttachMode('${v.id}','showcase',event)"
+          style="flex:1;min-width:70px;padding:6px 4px;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;border:1.5px solid #FE2C55;background:transparent;color:#FE2C55;transition:all .2s"
         >🛍️ Gắn link</button>
         <button
           id="btn-nolink-${v.id}"
-          onclick="setAttachLink('${v.id}', false, event)"
-          style="flex:1;padding:6px 4px;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;border:1.5px solid #444;background:transparent;color:#aaa;transition:all .2s"
-        >📹 Chỉ đăng video</button>
+          onclick="setAttachMode('${v.id}','none',event)"
+          style="flex:1;min-width:70px;padding:6px 4px;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;border:1.5px solid #444;background:transparent;color:#aaa;transition:all .2s"
+        >📹 Chỉ đăng</button>
+      </div>
+      <!-- SP gốc row: show detected name or manual input -->
+      <div id="shop-row-${v.id}" style="display:none;background:#1a1200;border:1px solid #FF8C00;border-radius:6px;padding:6px 8px;margin-bottom:6px">
+        ${v.shop_product && v.shop_product.name
+          ? `<div style="font-size:11px;color:#FF8C00">🏷️ SP gốc: <strong>${escHtml(v.shop_product.name.slice(0,60))}</strong>${v.shop_product.id ? `<span style="color:#555;margin-left:4px">#${escHtml(v.shop_product.id)}</span>` : ''}</div>`
+          : `<div style="font-size:10px;color:#FF8C00;font-weight:600;margin-bottom:4px">🏷️ Nhập tên SP để tìm trong showcase:</div>
+             <input id="sp-manual-${v.id}" type="text" placeholder="Vd: Áo Thun Nam Phông Trơn..."
+               oninput="onSpManualInput('${v.id}',this.value)" onclick="event.stopPropagation()"
+               style="width:100%;background:#111;border:1px solid #FF8C00;border-radius:4px;padding:5px 8px;color:#fff;font-size:11px;box-sizing:border-box"/>`
+        }
       </div>
       <div id="affiliate-row-${v.id}">
         <!-- ── Showcase product picker (primary) ── -->
@@ -907,39 +1102,52 @@ function buildVideoCard(v, idx) {
   if (state.delayMinutes[v.id] === undefined) {
     state.delayMinutes[v.id] = idx * 30;
   }
-  if (state.attachLink[v.id] === undefined) {
-    state.attachLink[v.id] = !!(v.product_url);
+  if (state.attachMode[v.id] === undefined) {
+    // Default to SP gốc mode always — user can switch to showcase/none
+    state.attachMode[v.id] = 'shop';
+    state.attachLink[v.id] = true;
   }
+  // Store detected shop_product (may have name or be empty {})
+  state.shopProduct[v.id] = v.shop_product || {};
 
   return card;
 }
 
-function setAttachLink(id, attach, e) {
+function setAttachMode(id, mode, e) {
   if (e) e.stopPropagation();
-  state.attachLink[id] = attach;
+  state.attachMode[id] = mode;
+  state.attachLink[id] = (mode !== 'none');
 
-  const btnAttach = document.getElementById(`btn-attach-${id}`);
-  const btnNo     = document.getElementById(`btn-nolink-${id}`);
-  const row       = document.getElementById(`affiliate-row-${id}`);
+  const btnShop    = document.getElementById(`btn-shop-${id}`);
+  const btnAttach  = document.getElementById(`btn-attach-${id}`);
+  const btnNo      = document.getElementById(`btn-nolink-${id}`);
+  const shopRow    = document.getElementById(`shop-row-${id}`);
+  const affRow     = document.getElementById(`affiliate-row-${id}`);
 
-  if (attach) {
-    btnAttach.style.background = '#FE2C55';
-    btnAttach.style.borderColor = '#FE2C55';
-    btnAttach.style.color = '#fff';
-    btnNo.style.background = 'transparent';
-    btnNo.style.borderColor = '#444';
-    btnNo.style.color = '#aaa';
-    row.style.display = 'block';
-  } else {
-    btnNo.style.background = '#444';
-    btnNo.style.borderColor = '#666';
-    btnNo.style.color = '#fff';
-    btnAttach.style.background = 'transparent';
-    btnAttach.style.borderColor = '#444';
-    btnAttach.style.color = '#aaa';
-    row.style.display = 'none';
+  const inactive = 'background:transparent;border-color:#444;color:#aaa;';
+  if (btnShop) btnShop.style.cssText += inactive;
+  btnAttach.style.cssText  += inactive;
+  btnNo.style.cssText      += inactive;
+
+  if (mode === 'shop') {
+    if (btnShop) { btnShop.style.background='#FF8C00'; btnShop.style.borderColor='#FF8C00'; btnShop.style.color='#fff'; }
+    if (shopRow) shopRow.style.display = 'block';
+    if (affRow)  affRow.style.display  = 'none';
+  } else if (mode === 'showcase') {
+    btnAttach.style.background = '#FE2C55'; btnAttach.style.borderColor = '#FE2C55'; btnAttach.style.color = '#fff';
+    if (shopRow) shopRow.style.display = 'none';
+    if (affRow)  affRow.style.display  = 'block';
+  } else { // none
+    btnNo.style.background = '#444'; btnNo.style.borderColor = '#666'; btnNo.style.color = '#fff';
+    if (shopRow) shopRow.style.display = 'none';
+    if (affRow)  affRow.style.display  = 'none';
   }
   updateActionBar();
+}
+
+// Kept for backward compatibility (called from toggleCard)
+function setAttachLink(id, attach, e) {
+  setAttachMode(id, attach ? (state.attachMode[id] || 'showcase') : 'none', e);
 }
 
 function toggleCard(id, idx) {
@@ -951,8 +1159,7 @@ function toggleCard(id, idx) {
     state.selected.add(id);
     document.getElementById(`card-${id}`).classList.add('selected');
     document.getElementById(`inputs-${id}`).style.display = 'flex';
-    // Apply current attach state to buttons/row
-    setAttachLink(id, state.attachLink[id] !== false, null);
+    setAttachMode(id, state.attachMode[id] || 'showcase', null);
     updatePostTimeHint(id);
   }
   updateActionBar();
@@ -965,6 +1172,12 @@ function clearSelection() {
     if (inp) inp.style.display = 'none';
   });
   state.selected.clear();
+  updateActionBar();
+}
+
+function onSpManualInput(id, value) {
+  // Update shopProduct with manually typed name (for SP gốc mode without auto-detected name)
+  state.shopProduct[id] = { id: '', name: value.trim(), price: '', image: '', url: '' };
   updateActionBar();
 }
 
@@ -1066,7 +1279,10 @@ function updateActionBar() {
   bar.style.display = 'block';
 
   const anyMissing = [...state.selected].some(id => {
-    if (state.attachLink[id] === false) return false;
+    const mode = state.attachMode[id] || 'showcase';
+    if (mode === 'none') return false;
+    if (mode === 'shop') return !(state.shopProduct[id] && state.shopProduct[id].name);
+    // showcase
     const hasProduct = !!(state.selectedProduct[id] || '').trim();
     const hasUrl = !!(state.affiliateLinks[id] || '').trim();
     return !hasProduct && !hasUrl;
@@ -1084,18 +1300,35 @@ async function submitSchedule() {
   for (const id of state.selected) {
     const v = state.videos.find(x => x.id === id);
     if (!v) continue;
-    const wantLink = state.attachLink[id] !== false;
-    const productId = wantLink ? (state.selectedProduct[id] || '').trim() : '';
-    const affiliate = (wantLink && !productId) ? (state.affiliateLinks[id] || '').trim() : '';
-    if (wantLink && !productId && !affiliate) {
-      showToast(`Video "${(v.title||'').slice(0,40)}..." chưa chọn sản phẩm hoặc nhập link`, 'error');
-      return;
+    const mode = state.attachMode[id] || 'showcase';
+    const wantLink = mode !== 'none';
+
+    let shopProduct = {};
+    let productId = '';
+    let affiliate = '';
+
+    if (mode === 'shop') {
+      // SP gốc: pass the source video's product dict → backend searches My shop by ID
+      shopProduct = state.shopProduct[id] || {};
+      if (!shopProduct.name) {
+        showToast(`Video "${(v.title||'').slice(0,40)}..." chưa có thông tin SP gốc`, 'error');
+        return;
+      }
+    } else if (mode === 'showcase') {
+      productId = (state.selectedProduct[id] || '').trim();
+      affiliate = productId ? '' : (state.affiliateLinks[id] || '').trim();
+      if (!productId && !affiliate) {
+        showToast(`Video "${(v.title||'').slice(0,40)}..." chưa chọn sản phẩm hoặc nhập link`, 'error');
+        return;
+      }
     }
+
     videos.push({
       video_url: v.url,
       caption: v.caption || v.title || '',
       product_url: affiliate,
       product_id: productId,
+      shop_product: shopProduct,
       delay_minutes: state.delayMinutes[id] ?? 0,
       thumbnail: v.thumbnail || '',
       title: v.title || '',

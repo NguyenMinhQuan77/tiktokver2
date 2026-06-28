@@ -78,6 +78,7 @@ async def _run_post(item_id: str):
             caption=caption,
             product_url=affiliate_url,
             product_id=item.get("product_id", ""),
+            shop_product=item.get("shop_product", {}),
         )
         item["status"] = "done"
         item["profile_url"] = result.get("profile_url", "")
@@ -98,6 +99,7 @@ def schedule_post(
     affiliate_url: str,
     delay_minutes: int,
     product_id: str = "",
+    shop_product: dict = {},
     thumbnail: str = "",
     title: str = "",
 ) -> dict:
@@ -117,6 +119,7 @@ def schedule_post(
         "caption": caption,
         "affiliate_url": affiliate_url,
         "product_id": product_id,
+        "shop_product": shop_product,
         "thumbnail": thumbnail,
         "delay_minutes": delay_minutes,
         "post_at": post_at,                               # datetime object (internal use)

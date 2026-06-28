@@ -17,6 +17,7 @@ class ScheduleVideoItem(BaseModel):
     caption: str
     product_url: str = ""   # manual URL input (used if product_id not set)
     product_id: str = ""    # TikTok Shop showcase product ID (preferred over product_url)
+    shop_product: dict = {} # source video's original product — searched in My shop by ID
     delay_minutes: int
     thumbnail: str = ""
     title: str = ""
@@ -38,6 +39,7 @@ async def create_schedule(req: ScheduleCreateRequest):
             caption=v.caption,
             affiliate_url=v.product_url,
             product_id=v.product_id,
+            shop_product=v.shop_product,
             delay_minutes=v.delay_minutes,
             thumbnail=v.thumbnail,
             title=v.title,

@@ -27,7 +27,17 @@
       "Bash(ffmpeg -version)",
       "Bash(ffprobe -version)",
       "Bash(ffprobe -v quiet -show_streams -of json /home/quannm1/Downloads/gym.mp4)",
-      "Bash(echo \"PID: $!\")"
+      "Bash(echo \"PID: $!\")",
+      "Bash(kill 239057)",
+      "Bash(nohup uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000)",
+      "Bash(grep -v \"^$\")",
+      "Bash(DISPLAY=:1 timeout 60 python3 -c ' *)",
+      "Bash(wait)",
+      "Bash(DISPLAY=:1 timeout 30 python3 -c ' *)",
+      "Bash(DISPLAY=:1 timeout 30 python3 *)",
+      "Bash(DISPLAY=:1 timeout 12 python3 -c ' *)",
+      "Bash(ffprobe -v quiet -show_entries format=size,duration -show_entries stream=codec_name,width,height -of default=nw=1 /home/quannm1/tiktok/temp/dl_0d8e012391.mp4)",
+      "Bash(grep -E \"\\\\.\\(py|ts|js|tsx|jsx\\)$\")"
     ]
   }
 }
