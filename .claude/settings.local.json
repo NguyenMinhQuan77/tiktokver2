@@ -57,7 +57,11 @@
       "Bash(sort -k5 -n -r)",
       "Bash(tee /tmp/test_post2.log)",
       "Bash(echo \"Test PID: $!\")",
-      "Bash(echo \"Exit: $?\")"
+      "Bash(echo \"Exit: $?\")",
+      "Bash(kill %2)",
+      "Bash(kill 1052102)",
+      "Bash(tee /tmp/test_leminh_39.log)",
+      "Bash(tee /tmp/test_scroll_fix.log)"
     ]
   }
 }

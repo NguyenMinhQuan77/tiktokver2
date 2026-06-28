@@ -26,7 +26,8 @@ def extract_shop_product(item: dict) -> dict:
         goods = anchor.get("goods") or {}
         name = (goods.get("goods_name") or goods.get("name") or "").strip()
         gid  = str(goods.get("goods_id") or goods.get("id") or "").strip()
-        if name:
+        if name or gid:
+            logger.debug(f"anchor goods: id={gid!r} name={name!r}")
             return {"id": gid, "name": name, "price": "", "image": "", "url": ""}
         extra_str = anchor.get("extra") or ""
         if extra_str:
@@ -38,20 +39,27 @@ def extract_shop_product(item: dict) -> dict:
                     gid = str(first.get("id", "")).strip()
                     keyword = first.get("keyword", "").strip()
                     if gid or keyword:
+                        logger.debug(f"anchor extra[0]: id={gid!r} keyword={keyword!r}")
                         return {"id": gid, "name": keyword, "price": "", "image": "", "url": ""}
                 elif isinstance(extra_data, dict):
                     name = (extra_data.get("goods_name") or extra_data.get("name") or extra_data.get("keyword") or "").strip()
                     gid = str(extra_data.get("goods_id") or extra_data.get("id") or "").strip()
                     if name or gid:
+                        logger.debug(f"anchor extra dict: id={gid!r} name={name!r}")
                         return {"id": gid, "name": name, "price": "", "image": "", "url": ""}
             except Exception:
                 pass
+        # Log unknown anchor structure so we can improve extraction later
+        anchor_keys = list(anchor.keys())
+        if anchor_keys:
+            logger.debug(f"anchor without goods/extra: keys={anchor_keys}")
 
     # 2. Fallback: bracket pattern [Product Name] in caption/description
     # Handle multiple field names: yt-dlp uses "description", TikTok API uses "desc", tikwm uses "title"
     desc = (item.get("desc") or item.get("description") or item.get("title") or "")
     m = re.search(r'\[([^\[\]\n]{4,100})\]', desc)
     if m:
+        logger.debug(f"bracket fallback (no ID): name={m.group(1).strip()!r}")
         return {"id": "", "name": m.group(1).strip(), "price": "", "image": "", "url": ""}
 
     return {}
@@ -334,16 +342,27 @@ async def _get_video_urls_playwright(profile_url: str, max_count: int = 10) -> t
         except Exception:
             pass
 
-        # Wait and scroll to trigger video list API calls
+        # Scroll to actual bottom repeatedly — each scroll triggers TikTok to load
+        # the next batch of videos (with anchor/product data). Fixed-% scrolling
+        # misses new content that loads after each batch, so we scroll to the real
+        # bottom each pass and stop only when no new items appear.
         await asyncio.sleep(4)
-        await page.evaluate("window.scrollTo(0, document.body.scrollHeight / 3)")
-        await asyncio.sleep(3)
+        _prev_captured = 0
+        for _pass in range(10):
+            await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+            await asyncio.sleep(2.5)
+            if len(captured_with_anchors) >= max_count:
+                break
+            if len(captured) == _prev_captured and _pass >= 2:
+                break  # No new content after two consecutive passes
+            _prev_captured = len(captured)
+        await asyncio.sleep(1)
 
-        # In-page fetch fallback: if response intercept captured nothing (rate-limited),
-        # call TikTok API via fetch() from inside the real Chrome context.
-        # The browser carries the user's session cookies + proper headers, so TikTok
-        # treats it as a legitimate user request rather than a bot.
-        if not captured:
+        # In-page fetch fallback: when response interception didn't capture enough
+        # videos (scroll-lazy-load may have only fired 1 API batch), call TikTok's
+        # item_list API directly from inside the browser context with count=max_count.
+        # The browser carries the real session cookies so TikTok treats it as legit.
+        if len(captured_with_anchors) < max_count:
             logger.info("Response intercept captured 0 items — trying in-page fetch fallback...")
             try:
                 page_data = await page.evaluate("""() => {
@@ -389,33 +408,82 @@ async def _get_video_urls_playwright(profile_url: str, max_count: int = 10) -> t
                     total_count = int(page_data['videoCount'])
                     logger.info(f"Profile total video count: {total_count}")
                 if sec_uid:
-                    logger.info(f"secUid extracted: {sec_uid[:30]}... — calling item_list in-page")
-                    result = await page.evaluate("""async ([secUid, maxCount]) => {
-                        try {
-                            const resp = await fetch(
-                                'https://www.tiktok.com/api/post/item_list/?aid=1988&count=' + maxCount +
-                                '&secUid=' + encodeURIComponent(secUid) +
-                                '&cursor=0&app_name=tiktok_web&device_platform=web_pc',
-                                {credentials: 'include'}
-                            );
-                            return await resp.json();
-                        } catch(e) {
-                            return null;
-                        }
-                    }""", [sec_uid, max_count])
-                    if result and result.get("itemList"):
+                    logger.info(f"secUid extracted: {sec_uid[:30]}... — calling item_list in-page (need {max_count - len(captured_with_anchors)} more)")
+                    _existing_ids = {(i.get("id") or i.get("aweme_id","")) for i in captured}
+                    _cursor = 0
+                    _batch = 30
+                    for _page_num in range(5):  # up to 5 pages = 150 videos
+                        result = await page.evaluate("""async ([secUid, count, cursor]) => {
+                            try {
+                                const resp = await fetch(
+                                    'https://www.tiktok.com/api/post/item_list/?aid=1988&count=' + count +
+                                    '&secUid=' + encodeURIComponent(secUid) +
+                                    '&cursor=' + cursor + '&app_name=tiktok_web&device_platform=web_pc',
+                                    {credentials: 'include'}
+                                );
+                                return await resp.json();
+                            } catch(e) {
+                                return null;
+                            }
+                        }""", [sec_uid, _batch, _cursor])
+                        if not result or not result.get("itemList"):
+                            logger.info(f"In-page fetch page {_page_num}: no items (cursor={_cursor})")
+                            break
                         new_items = result["itemList"]
-                        logger.info(f"In-page fetch: {len(new_items)} items")
+                        logger.info(f"In-page fetch page {_page_num} (cursor={_cursor}): {len(new_items)} items")
+                        added = 0
                         for item in new_items:
-                            captured.append(item)
-                            if item.get("anchors"):
-                                captured_with_anchors.append(item)
-                    else:
-                        logger.warning(f"In-page fetch returned no itemList (result keys: {list((result or {}).keys())})")
+                            _iid = item.get("id") or item.get("aweme_id", "")
+                            if _iid not in _existing_ids:
+                                _existing_ids.add(_iid)
+                                captured.append(item)
+                                added += 1
+                                if item.get("anchors"):
+                                    captured_with_anchors.append(item)
+                        logger.info(f"  → {added} new items added (total captured: {len(captured_with_anchors)} with anchors)")
+                        if len(captured_with_anchors) >= max_count:
+                            break
+                        if not result.get("hasMore"):
+                            break
+                        _cursor = result.get("cursor") or (_cursor + len(new_items))
                 else:
                     logger.warning("Could not extract secUid from page DOM — skipping in-page fetch")
             except Exception as _e:
                 logger.debug(f"In-page fetch error: {_e}")
+
+        # For items captured without anchor data, try fetching their detail via
+        # TikTok's item/detail API (uses the live Playwright session with cookies).
+        captured_ids_with_anchors = {
+            (item.get("id") or item.get("aweme_id", "")) for item in captured_with_anchors
+        }
+        items_needing_enrichment = [
+            item for item in captured
+            if (item.get("id") or item.get("aweme_id", "")) not in captured_ids_with_anchors
+        ]
+        if items_needing_enrichment:
+            logger.info(f"Trying item/detail API for {len(items_needing_enrichment)} items without anchors")
+            for _item in items_needing_enrichment[:max_count]:
+                _vid_id = _item.get("id") or _item.get("aweme_id", "")
+                if not _vid_id:
+                    continue
+                try:
+                    _detail_resp = await page.context.request.get(
+                        f"https://www.tiktok.com/api/item/detail/?itemId={_vid_id}&aid=1988",
+                        headers={"Accept": "application/json"},
+                    )
+                    _detail_data = await _detail_resp.json()
+                    _detail_item = (
+                        (_detail_data.get("itemInfo") or {}).get("itemStruct")
+                        or _detail_data.get("item")
+                        or {}
+                    )
+                    if _detail_item.get("anchors"):
+                        _item["anchors"] = _detail_item["anchors"]
+                        captured_with_anchors.append(_item)
+                        captured_ids_with_anchors.add(_vid_id)
+                        logger.info(f"  item/detail enriched anchors for {_vid_id}")
+                except Exception as _e:
+                    logger.debug(f"  item/detail {_vid_id}: {_e}")
 
         # Prefer items that have anchor data (product links)
         items_to_use = captured_with_anchors if captured_with_anchors else captured

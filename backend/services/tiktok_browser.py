@@ -429,9 +429,16 @@ async def _open_add_link_modal(page):
 
 
 async def _search_and_select_myshop(page, sp_id: str, sp_name: str):
-    """Switch to Showcase products tab, type search term, click search button (kính lúp), select best row."""
+    """
+    Find product in showcase by product ID.
 
-    # Set up request interception BEFORE clicking Showcase tab so we can capture the API endpoint
+    Flow:
+    1. Check via showcase_product/list API whether sp_id is in showcase
+    2. If not → add via OEC add_targets:[2] (or fallback strategies)
+    3. Switch to Showcase products tab
+    4. Type product ID in search box (NOT name) → TikTok filters by ID
+    5. Click row whose text contains sp_id — no name matching, no first-row fallback
+    """
     _intercepted: list = []
 
     async def _capture_api(req):
@@ -439,11 +446,126 @@ async def _search_and_select_myshop(page, sp_id: str, sp_name: str):
         if any(kw in url.lower() for kw in ['product', 'showcase', 'affiliate', 'item']):
             if not any(skip in url for skip in ['.js', '.css', '.png', '.jpg', '.woff']):
                 _intercepted.append({'url': url, 'method': req.method, 'headers': dict(req.headers)})
-                logger.debug(f"API intercepted: {req.method} {url[:120]}")
 
     page.on("request", _capture_api)
 
-    # Switch to Showcase products tab
+    # --- Step 1: Check via API by product ID (and resolve ID from name if needed) ---
+    logger.info(f"Checking showcase for product ID: {sp_id!r} name: {sp_name!r}")
+    in_showcase = False
+    _all_showcase_prods: list = []
+    try:
+        for _offset in range(0, 300, 20):
+            _resp = await page.context.request.get(
+                f"https://shop.tiktok.com/api/v1/streamer_desktop/showcase_product/list?offset={_offset}&count=20",
+                headers={"Accept": "application/json"},
+            )
+            _data = json.loads(await _resp.text())
+            _prods = (_data.get("data") or {}).get("products") or []
+            _all_showcase_prods.extend(_prods)
+            for _p in _prods:
+                _pid = str(_p.get("product_id", "") or _p.get("id", ""))
+                if sp_id and _pid == sp_id:
+                    in_showcase = True
+            if in_showcase or not _prods or not (_data.get("data") or {}).get("has_more"):
+                break
+    except Exception as _e:
+        logger.warning(f"Showcase API check: {_e}")
+
+    # 1b. If still no ID but have name → try showcase list name-match to resolve ID
+    if not sp_id and sp_name and _all_showcase_prods:
+        _name_lower = sp_name.strip().lower()
+        for _p in _all_showcase_prods:
+            _pname = (_p.get("title") or "").strip().lower()
+            if _pname and (_name_lower in _pname or _pname in _name_lower):
+                sp_id = str(_p.get("product_id") or "")
+                logger.info(f"Resolved product ID from showcase name match: {sp_id} (name: {sp_name[:60]})")
+                in_showcase = True
+                break
+        if not sp_id:
+            logger.info(f"Not in showcase by name — will try TikTok search API to resolve ID")
+
+    # 1c. If still no ID but have name → call TikTok search APIs to find product ID
+    if not sp_id and sp_name:
+        import re as _re
+        # Clean informal price suffixes like "1xx", "2xx", "150k", "100-200k" from name
+        _clean_name = _re.sub(r'\s*[\d]+[xXkK]+[\w]*$', '', sp_name).strip()
+        _clean_name = _re.sub(r'\s*\d{2,3}[kK]$', '', _clean_name).strip() or sp_name
+
+        # Try multiple search endpoints and query variants
+        _search_queries = list(dict.fromkeys([sp_name[:80], _clean_name[:80]]))  # deduplicate
+        _search_endpoints = [
+            "https://shop.tiktok.com/api/v1/streamer_desktop/search_product/list",
+            "https://shop.tiktok.com/api/v1/creator/product/search",
+        ]
+        for _endpoint in _search_endpoints:
+            if sp_id:
+                break
+            for _q in _search_queries:
+                if sp_id:
+                    break
+                try:
+                    import urllib.parse as _up
+                    _search_resp = await page.context.request.get(
+                        f"{_endpoint}?query={_up.quote(_q)}&count=20&offset=0",
+                        headers={"Accept": "application/json"},
+                    )
+                    _search_data = json.loads(await _search_resp.text())
+                    _search_prods = (
+                        (_search_data.get("data") or {}).get("products")
+                        or (_search_data.get("data") or {}).get("items")
+                        or (_search_data.get("products")) or []
+                    )
+                    logger.info(f"Search API {_endpoint.split('/')[-1]} '{_q[:40]}': {len(_search_prods)} results")
+                    if _search_prods:
+                        _name_lower = _clean_name.lower()
+                        _best = None
+                        for _p in _search_prods:
+                            _pname = (_p.get("title") or "").strip().lower()
+                            if _pname and (_name_lower in _pname or _pname in _name_lower):
+                                _best = _p
+                                break
+                        if not _best:
+                            _best = _search_prods[0]
+                        sp_id = str(_best.get("product_id") or "")
+                        if sp_id:
+                            logger.info(f"Resolved product ID from search API: {sp_id} title={(_best.get('title') or '')[:60]}")
+                except Exception as _e:
+                    logger.warning(f"Search API {_endpoint.split('/')[-1]}: {_e}")
+
+    logger.info(f"Product {sp_id!r} in showcase: {in_showcase}")
+
+    # --- Step 2: If not in showcase, add it ---
+    if not in_showcase and sp_id:
+        logger.info("Product not in showcase — adding via OEC add_targets:[2]")
+        try:
+            _oec_resp = await page.context.request.post(
+                "https://shop.tiktok.com/aweme/v1/oec/content/creator/products?aid=1180&carrier_region=TH",
+                data=json.dumps({"products": [{"product_id": sp_id}], "add_targets": [2]}),
+                headers={
+                    "Content-Type": "application/json",
+                    "Accept": "application/json",
+                    "Origin": "https://www.tiktok.com",
+                    "Referer": "https://www.tiktok.com/tiktokstudio/upload",
+                },
+            )
+            _oec_text = await _oec_resp.text()
+            logger.info(f"OEC add_targets:[2]: {_oec_resp.status} {_oec_text[:200]}")
+            _pid_res = (json.loads(_oec_text).get("add_results") or {}).get(sp_id, {})
+            if _pid_res.get("is_in_showcase"):
+                in_showcase = True
+        except Exception as _e:
+            logger.warning(f"OEC add: {_e}")
+
+        if not in_showcase:
+            logger.info("OEC did not add — trying showcase_product/add fallback")
+            if await _add_product_to_showcase(page, sp_id, sp_name, _intercepted):
+                in_showcase = True
+
+        if not in_showcase:
+            logger.warning(f"Could not add product {sp_id} to showcase")
+
+    # --- Step 3: Switch to Showcase products tab (and wait for list to refresh) ---
+    _tab_clicked = False
     for tab_sel in [
         'text="Showcase products"', ':text("Showcase products")',
         ':text("Sản phẩm giới thiệu")',
@@ -453,220 +575,135 @@ async def _search_and_select_myshop(page, sp_id: str, sp_name: str):
             if await tab.count() > 0 and await tab.is_visible():
                 await tab.click()
                 logger.info(f"Switched to Showcase products tab via: {tab_sel}")
-                await asyncio.sleep(2)
+                _tab_clicked = True
+                # Wait longer if product was just added (needs time to refresh in dialog)
+                await asyncio.sleep(4 if in_showcase else 2)
                 break
         except Exception:
             pass
 
-    # Try to enrich name from user's showcase cache (populated by /product/showcase/refresh)
-    if sp_id:
-        try:
-            from backend.services import product_service as _ps
-            for _prod in _ps.get_cached_products():
-                if str(_prod.get("id", "")) == sp_id:
-                    full_name = (_prod.get("name") or "").strip()
-                    if full_name:
-                        sp_name = full_name
-                        logger.info(f"Enriched product name from showcase cache: '{sp_name}'")
-                    break
-        except Exception:
-            pass
-
-    # Always prefer product ID for search — exact match, avoids selecting wrong similar-name product.
-    # Only fall back to name when there is no ID.
-    search_by_id = bool(sp_id)
-    search_term = sp_id if sp_id else sp_name[:60]
-    logger.info(f"Searching Showcase for: '{search_term}' (by_id={search_by_id})")
-
-    # --- Step 1: Find search input inside the dialog and type ---
-    # Use JS to find the input scoped to the visible dialog/modal container
-    input_coords = None
-    try:
-        input_coords = await page.evaluate("""() => {
-            const dialogs = Array.from(document.querySelectorAll('[role="dialog"], [aria-modal="true"]'))
-                .filter(el => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; });
-            const container = dialogs.length ? dialogs[dialogs.length - 1] : document.body;
-            const inputs = Array.from(container.querySelectorAll('input')).filter(el => {
-                const r = el.getBoundingClientRect();
-                return r.width > 0 && r.height > 0 && r.top < window.innerHeight && r.bottom > 0;
-            });
-            if (!inputs.length) return null;
-            const r = inputs[0].getBoundingClientRect();
-            return {x: r.x + r.width / 2, y: r.y + r.height / 2};
-        }""")
-    except Exception as e:
-        logger.debug(f"JS input search failed: {e}")
-
-    typed = False
-    if input_coords:
-        await page.mouse.click(input_coords['x'], input_coords['y'])
-        await asyncio.sleep(0.3)
-        await page.keyboard.press("Control+a")
-        await page.keyboard.type(search_term, delay=40)
-        await asyncio.sleep(0.5)
-        logger.info(f"Typed '{search_term}' in search box via JS coords")
-        typed = True
-    else:
-        for s_sel in ['input[placeholder*="earch"]', 'input[placeholder*="ìm"]',
-                      'input[placeholder*="roduct"]', 'input[type="search"]']:
+    async def _cancel_dialog():
+        """Click Cancel to close the dialog cleanly."""
+        for _sel in ['button:has-text("Cancel")', ':text("Cancel")', 'button:has-text("Hủy")']:
             try:
-                inp = page.locator(s_sel).first
-                if await inp.count() > 0 and await inp.is_visible():
-                    await inp.triple_click()
-                    await inp.type(search_term, delay=40)
-                    await asyncio.sleep(0.5)
-                    typed = True
-                    break
+                _btn = page.locator(_sel).last
+                if await _btn.count() > 0 and await _btn.is_visible():
+                    await _btn.click()
+                    logger.info("Closed product dialog via Cancel")
+                    return
             except Exception:
                 pass
 
-    if not typed:
-        logger.warning("Could not find search input in Showcase dialog")
-        return
-
-    # --- Step 2: Click the magnifying glass / search button (kính lúp) ---
-    # Try to find a search-trigger button adjacent to the input (svg icon or button[type=submit])
-    search_btn_clicked = False
-    try:
-        search_btn_clicked = await page.evaluate("""() => {
-            const dialogs = Array.from(document.querySelectorAll('[role="dialog"], [aria-modal="true"]'))
-                .filter(el => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; });
-            const container = dialogs.length ? dialogs[dialogs.length - 1] : document.body;
-            // Look for a button with svg (magnifying glass) that is visible
-            const btns = Array.from(container.querySelectorAll('button')).filter(b => {
-                const r = b.getBoundingClientRect();
-                return r.width > 0 && r.height > 0 && r.top < window.innerHeight && r.bottom > 0;
-            });
-            // Prefer button[type=submit] or button containing svg/search icon
-            const searchBtn = btns.find(b =>
-                b.type === 'submit' ||
-                b.querySelector('svg') !== null ||
-                b.innerHTML.toLowerCase().includes('search') ||
-                b.getAttribute('aria-label')?.toLowerCase().includes('search')
-            );
-            if (searchBtn) {
-                const r = searchBtn.getBoundingClientRect();
-                searchBtn.dispatchEvent(new MouseEvent('click', {bubbles: true, cancelable: true}));
-                return true;
-            }
-            return false;
-        }""")
-    except Exception as e:
-        logger.debug(f"Search button JS click failed: {e}")
-
-    if search_btn_clicked:
-        logger.info("Clicked search button (kính lúp) via JS")
-    else:
-        # Fallback: press Enter to trigger search
-        await page.keyboard.press("Enter")
-        logger.info("Pressed Enter to trigger search")
-
-    await asyncio.sleep(2.5)  # wait for results to load
-
-    # Debug screenshot after search
-    try:
-        p = os.path.join(_TEMP_DIR, "debug_showcase_search.png")
-        await page.screenshot(path=p)
-        logger.info(f"Showcase search result screenshot: {p}")
-    except Exception:
-        pass
-
-    # --- Step 3: Log rows and select correct row ---
-    import unicodedata
-
-    def _norm(s: str) -> str:
-        return unicodedata.normalize("NFC", s).strip().lower()
-
-    product_rows = page.locator("table tbody tr")
-    row_count = await product_rows.count()
-    logger.info(f"Showcase: {row_count} rows after search")
-
-    best_idx = -1
-    best_score = -1
-
-    for _di in range(min(row_count, 20)):
+    async def _type_in_search(term: str):
+        """Find the search input in the dialog and type term."""
+        coords = None
         try:
-            _rt = _norm((await product_rows.nth(_di).inner_text()).replace("\n", " "))
-            logger.info(f"  Row {_di}: {_rt[:80]}")
+            coords = await page.evaluate("""() => {
+                const dialogs = Array.from(document.querySelectorAll('[role="dialog"], [aria-modal="true"]'))
+                    .filter(el => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; });
+                const container = dialogs.length ? dialogs[dialogs.length - 1] : document.body;
+                const inputs = Array.from(container.querySelectorAll('input')).filter(el => {
+                    const r = el.getBoundingClientRect();
+                    return r.width > 0 && r.height > 0 && r.top < window.innerHeight && r.bottom > 0;
+                });
+                if (!inputs.length) return null;
+                const r = inputs[0].getBoundingClientRect();
+                return {x: r.x + r.width / 2, y: r.y + r.height / 2};
+            }""")
+        except Exception:
+            pass
+        if coords:
+            await page.mouse.click(coords['x'], coords['y'])
+            await asyncio.sleep(0.3)
+            await page.keyboard.press("Control+a")
+            await page.keyboard.type(term, delay=40)
+            await asyncio.sleep(0.5)
+            await page.keyboard.press("Enter")
+            return True
+        return False
 
-            if search_by_id:
-                # Exact ID match only — do not pick by name similarity
+    # --- Step 4: Search by product ID only — never by name ---
+    if not sp_id:
+        logger.warning("No product ID available — cancelling dialog, will post without product")
+        try:
+            page.remove_listener("request", _capture_api)
+        except Exception:
+            pass
+        await _cancel_dialog()
+        return False
+
+    async def _search_and_find_rows(wait_secs: float = 2.5) -> int:
+        """Type sp_id in search box, wait, return index of matching row or -1."""
+        typed = await _type_in_search(sp_id)
+        if typed:
+            logger.info(f"Typed product ID '{sp_id}' in search box")
+        else:
+            logger.warning("Could not find search input — search skipped")
+        await asyncio.sleep(wait_secs)
+        await page.screenshot(path=os.path.join(_TEMP_DIR, "debug_showcase_search.png"))
+        rows = page.locator("table tbody tr")
+        cnt = await rows.count()
+        logger.info(f"Showcase rows after ID search: {cnt}")
+        for _i in range(min(cnt, 20)):
+            try:
+                _rt = await rows.nth(_i).inner_text()
+                logger.info(f"  Row {_i}: {_rt[:120]}")
                 if sp_id in _rt:
-                    best_idx = _di
-                    best_score = 999
-                    logger.info(f"  → Exact ID match at row {_di}")
-                    break  # ID is unique, stop immediately
-            else:
-                # No ID → score by name word overlap
-                sp_words = [w for w in _norm(sp_name).split() if len(w) >= 3]
-                score = sum(1 for w in sp_words if w in _rt) if sp_words else 0
-                if score > best_score:
-                    best_score = score
-                    best_idx = _di
-        except Exception:
-            pass
-
-    # When searching by ID and no exact match found, do NOT fall back to first row
-    if best_idx < 0 and row_count > 0 and not search_by_id:
-        best_idx = 0  # name-search fallback only
-
-    if best_idx < 0:
-        logger.warning("No rows found in Showcase after search — trying to add product to showcase automatically")
-        logger.info(f"Intercepted {len(_intercepted)} API calls: {[i['url'][:80] for i in _intercepted[:5]]}")
-        added = await _add_product_to_showcase(page, sp_id, sp_name, _intercepted)
-        if added:
-            logger.info("Product added to showcase — clearing search and reloading full list...")
-            await asyncio.sleep(3)
-            # Clear the search box so the full showcase list loads (search by ID fails in dialog)
-            if input_coords:
-                await page.mouse.click(input_coords['x'], input_coords['y'])
-                await asyncio.sleep(0.3)
-                await page.keyboard.press("Control+a")
-                await page.keyboard.press("Delete")
-                await asyncio.sleep(0.5)
-                await page.keyboard.press("Enter")
-                await asyncio.sleep(4)
-            # Re-fetch rows after clearing search
-            row_count = await product_rows.count()
-            logger.info(f"Showcase rows after clear+reload: {row_count}")
-            # Scan rows for our product ID
-            if row_count > 0:
-                best_idx = 0  # default to first row
-                for i in range(row_count):
-                    try:
-                        rt = await product_rows.nth(i).inner_text()
-                        if sp_id and sp_id in rt:
-                            best_idx = i
-                            logger.info(f"Found product {sp_id} at row {i} after clear")
-                            break
-                    except Exception:
-                        pass
-        if best_idx < 0:
-            logger.warning("Still no rows after add-to-showcase attempt — giving up")
-            try:
-                page.remove_listener("request", _capture_api)
+                    logger.info(f"  → ID match at row {_i}")
+                    return _i
             except Exception:
                 pass
-            return
+        return -1
+
+    # --- Step 5: Search and select ---
+    found_idx = await _search_and_find_rows(wait_secs=3.0)
+
+    # If 0 results and product was just added, re-click tab and retry up to 4 times.
+    # TikTok can take 10-20s to index a newly added product in the dialog search.
+    if found_idx < 0 and in_showcase:
+        for _retry in range(4):
+            logger.info(f"0 rows after add — retry {_retry+1}/4: re-clicking Showcase tab, waiting 6s")
+            for tab_sel in ['text="Showcase products"', ':text("Showcase products")', ':text("Sản phẩm giới thiệu")']:
+                try:
+                    _t = page.locator(tab_sel).first
+                    if await _t.count() > 0 and await _t.is_visible():
+                        await _t.click()
+                        await asyncio.sleep(6)
+                        break
+                except Exception:
+                    pass
+            found_idx = await _search_and_find_rows(wait_secs=3.0)
+            if found_idx >= 0:
+                break
 
     try:
         page.remove_listener("request", _capture_api)
     except Exception:
         pass
 
-    logger.info(f"Best matching row: {best_idx} (score={best_score})")
+    if found_idx < 0:
+        logger.warning(f"Product ID {sp_id} not found in search results after retry — cancelling dialog")
+        await _cancel_dialog()
+        return False
+
+    product_rows = page.locator("table tbody tr")
+
     for target in [
-        product_rows.nth(best_idx).locator('input[type="radio"]').first,
-        product_rows.nth(best_idx).locator('input[type="checkbox"]').first,
-        product_rows.nth(best_idx),
+        product_rows.nth(found_idx).locator('input[type="radio"]').first,
+        product_rows.nth(found_idx).locator('input[type="checkbox"]').first,
+        product_rows.nth(found_idx),
     ]:
         try:
             if await target.count() > 0:
                 await target.click(force=True)
-                logger.info(f"Selected Showcase row {best_idx}")
-                return
+                logger.info(f"Selected Showcase row {found_idx} (product ID: {sp_id})")
+                return True
         except Exception:
             pass
+
+    logger.warning("Could not click any target in matching row — cancelling dialog")
+    await _cancel_dialog()
+    return False
 
 
 async def _add_product_to_showcase(page, sp_id: str, sp_name: str, intercepted_api: list = None) -> bool:
@@ -1579,51 +1616,27 @@ async def post_video(video_path: str, caption: str, product_url: str = "", produ
             logger.info(f"Attaching SP gốc: name='{sp_name}' id='{sp_id}'")
             try:
                 await _open_add_link_modal(page)
-                await _search_and_select_myshop(page, sp_id, sp_name)
-                await _confirm_product_dialog(page)
+                _selected = await _search_and_select_myshop(page, sp_id, sp_name)
+                if _selected:
+                    await _confirm_product_dialog(page)
+                else:
+                    logger.error(f"SP gốc: could not find/add product — aborting post")
+                    await browser.close()
+                    return {"success": False, "message": f"Không tìm được sản phẩm '{sp_name}' (ID: '{sp_id}') để gắn vào video. Video chưa được đăng."}
             except Exception as e:
-                logger.warning(f"SP gốc attach failed: {e}")
+                logger.error(f"SP gốc attach exception: {e}")
+                await browser.close()
+                return {"success": False, "message": f"Lỗi khi gắn sản phẩm '{sp_name}' (ID: '{sp_id}'): {e}. Video chưa được đăng."}
 
         elif product_id:
-            logger.info(f"Attaching showcase product: {product_id}")
+            logger.info(f"Attaching showcase product by ID: {product_id}")
             try:
                 await _open_add_link_modal(page)
-
-                # Switch to "Showcase products" tab
-                for tab_sel in ['text="Showcase products"', ':text("Sản phẩm giới thiệu")']:
-                    tab = page.locator(tab_sel).first
-                    if await tab.count() > 0 and await tab.is_visible():
-                        await tab.click()
-                        await asyncio.sleep(2)
-                        logger.info(f"Switched to Showcase products tab via {tab_sel}")
-                        break
-
-                # Find product row matching product_id
-                product_rows = page.locator("table tbody tr")
-                row_count = await product_rows.count()
-                logger.info(f"Found {row_count} showcase rows")
-                found = False
-                for i in range(row_count):
-                    row = product_rows.nth(i)
-                    try:
-                        row_text = await row.inner_text()
-                    except Exception:
-                        continue
-                    if product_id in row_text:
-                        radio = row.locator('input[type="radio"]').first
-                        if await radio.count() > 0:
-                            await radio.click()
-                            found = True
-                            logger.info(f"Selected product {product_id} at row {i}")
-                            break
-
-                if not found and row_count > 0:
-                    radio = product_rows.nth(0).locator('input[type="radio"]').first
-                    if await radio.count() > 0:
-                        await radio.click()
-                        logger.info("Selected first product row (fallback)")
-
-                await _confirm_product_dialog(page)
+                _selected = await _search_and_select_myshop(page, product_id, "")
+                if _selected:
+                    await _confirm_product_dialog(page)
+                else:
+                    logger.warning("Showcase: no product selected — posting without product")
             except Exception as e:
                 logger.warning(f"Could not attach showcase product: {e}")
 

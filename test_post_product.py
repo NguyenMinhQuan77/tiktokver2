@@ -16,13 +16,13 @@ logging.basicConfig(
 
 from backend.services.tiktok_browser import post_video
 
-VIDEO_PATH = "/home/quannm1/tiktok/temp/dl_b3399f3c43.mp4"
-CAPTION = "Test đăng video với sản phẩm #cleanfit #thunnam"
-PRODUCT_ID = "1734586165929477397"
+VIDEO_PATH = "/home/quannm1/tiktok/temp/dl_07ad3f8eac.mp4"
+CAPTION = "Test search by product ID #cleanfit"
+# sp gốc from @_xiangg__ first video
 SHOP_PRODUCT = {
-    "id": "1734586165929477397",
-    "name": "Phiên Bản Nâng Cấp Cleanfit áo thun",
-    "price": "220000",
+    "id": "1730113435668745075",
+    "name": "Áo Chống Nắng Nam Nữ Nón 2 Lớp",
+    "price": "",
     "image": "",
     "url": "",
 }
@@ -30,14 +30,13 @@ SHOP_PRODUCT = {
 async def main():
     print(f"Posting: {VIDEO_PATH}")
     print(f"Caption: {CAPTION}")
-    print(f"Product ID (showcase): {PRODUCT_ID}")
+    print(f"Shop product ID: {SHOP_PRODUCT['id']}")
     print("---")
-    # Use product_id only → triggers "Showcase products" tab search
-    # (shop_product mode would search "My shop" tab instead)
+    # sp gốc mode: shop_product with ID → _search_and_select_myshop searches by ID
     result = await post_video(
         video_path=VIDEO_PATH,
         caption=CAPTION,
-        product_id=PRODUCT_ID,
+        shop_product=SHOP_PRODUCT,
     )
     print("Result:", json.dumps(result, ensure_ascii=False, indent=2))
 
