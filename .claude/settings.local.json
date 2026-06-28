@@ -37,7 +37,27 @@
       "Bash(DISPLAY=:1 timeout 30 python3 *)",
       "Bash(DISPLAY=:1 timeout 12 python3 -c ' *)",
       "Bash(ffprobe -v quiet -show_entries format=size,duration -show_entries stream=codec_name,width,height -of default=nw=1 /home/quannm1/tiktok/temp/dl_0d8e012391.mp4)",
-      "Bash(grep -E \"\\\\.\\(py|ts|js|tsx|jsx\\)$\")"
+      "Bash(grep -E \"\\\\.\\(py|ts|js|tsx|jsx\\)$\")",
+      "Bash(pkill -f \"uvicorn\")",
+      "Bash(uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000)",
+      "Bash(pkill -9 -f \"uvicorn\")",
+      "Bash(pkill -9 -f \"chrome\")",
+      "Bash(kill %1)",
+      "Bash(jobs -l)",
+      "Bash(pkill -f \"uvicorn backend.main:app\")",
+      "Bash(echo \"Add request sent, PID=$!\")",
+      "Bash(echo \"Request started, PID=$!\")",
+      "Bash(echo \"started PID=$!\")",
+      "Bash(echo \"Request sent, PID=$!\")",
+      "Bash(pkill -f \"uvicorn backend\")",
+      "Bash(echo \"curl error $?\")",
+      "Bash(echo \"PID $!\")",
+      "Bash(echo \"Server PID: $!\")",
+      "Bash(echo \"Curl PID: $!\")",
+      "Bash(sort -k5 -n -r)",
+      "Bash(tee /tmp/test_post2.log)",
+      "Bash(echo \"Test PID: $!\")",
+      "Bash(echo \"Exit: $?\")"
     ]
   }
 }
