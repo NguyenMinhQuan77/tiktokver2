@@ -73,7 +73,8 @@
       "Bash(curl -s -X POST http://localhost:8000/profile/videos -H 'Content-Type: application/json' -d '{\"url\": \"https://www.tiktok.com/@_xiangg__\"}')",
       "Bash(python3 -c ' *)",
       "Bash(curl -s -X POST http://localhost:8000/auth/switch -H 'Content-Type: application/json' -d '{\"handle\": \"n.shop.123\"}')",
-      "Bash(curl -s -X POST http://localhost:8000/schedule/create -H 'Content-Type: application/json' -d '{ *)"
+      "Bash(curl -s -X POST http://localhost:8000/schedule/create -H 'Content-Type: application/json' -d '{ *)",
+      "Bash(mkdir -p temp)"
     ]
   }
 }

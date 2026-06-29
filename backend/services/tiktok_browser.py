@@ -116,7 +116,7 @@ def delete_cookies():
 
 
 async def login(username: str, password: str) -> dict:
-    """Open visible browser at TikTok login. User logs in manually."""
+    """Open visible browser, auto-fill credentials, wait for captcha/2FA if needed."""
     async with async_playwright() as p:
         browser = await p.chromium.launch(
             headless=False,
@@ -128,8 +128,11 @@ async def login(username: str, password: str) -> dict:
             user_agent=USER_AGENT,
         )
         page = await context.new_page()
-        await page.goto("https://www.tiktok.com/login", wait_until="domcontentloaded")
 
+        # Open main login page — user chooses method (Google, email, etc.)
+        await page.goto("https://www.tiktok.com/login", wait_until="domcontentloaded")
+        await asyncio.sleep(2)
+        logger.info(f"Login page opened for {username} — waiting for user to complete login...")
         try:
             await page.wait_for_url(
                 lambda url: "tiktok.com" in url and "/login" not in url,
@@ -1733,6 +1736,7 @@ async def post_video(video_path: str, caption: str, product_url: str = "", produ
     if not cookies:
         raise RuntimeError("Chưa đăng nhập TikTok.")
 
+    logger.info(f"[post_video] active_handle={_active_handle} cookies_file={_cookies_file()}")
     username = _get_username_from_cookies(cookies)
 
     # When show_browser=False, push window far off-screen instead of headless
@@ -1800,9 +1804,17 @@ async def post_video(video_path: str, caption: str, product_url: str = "", produ
 
         # --- Step 1: Upload file ---
         logger.info("Finding file input...")
+        # Retry up to 3 times — TikTok Studio may load the upload area after a short delay
         inputs = page.locator('input[type="file"]')
-        count = await inputs.count()
+        for _attempt in range(3):
+            count = await inputs.count()
+            if count > 0:
+                break
+            logger.warning(f"No file input yet (attempt {_attempt+1}/3), waiting 5s... url={page.url}")
+            await asyncio.sleep(5)
         if count == 0:
+            await page.screenshot(path=os.path.join(_TEMP_DIR, "error_no_file_input.png"))
+            logger.error(f"[post_video] no file input found after retries, url={page.url}, title={await page.title()}")
             await browser.close()
             raise RuntimeError("Không tìm thấy ô upload file. TikTok Studio có thể đã thay đổi giao diện.")
 

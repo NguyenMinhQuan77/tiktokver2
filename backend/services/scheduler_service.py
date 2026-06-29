@@ -71,6 +71,10 @@ async def _run_post(item_id: str):
         if affiliate_url and affiliate_url not in caption:
             caption = f"{caption}\n\n{affiliate_url}".strip()
 
+        # Restore account that was active when this job was scheduled
+        if item.get("account_handle"):
+            tiktok_browser.set_active_account(item["account_handle"])
+
         # Post to TikTok via Playwright
         item["status"] = "posting"
         result = await tiktok_browser.post_video(
@@ -108,6 +112,7 @@ def schedule_post(
     thumbnail: str = "",
     title: str = "",
     show_browser: bool = True,
+    account_handle: str = "",
 ) -> dict:
     """
     Create and enqueue a new scheduled post.
@@ -120,6 +125,7 @@ def schedule_post(
 
     item = {
         "id": item_id,
+        "account_handle": account_handle or tiktok_browser.get_active_handle(),
         "video_url": video_url,
         "title": title,
         "caption": caption,

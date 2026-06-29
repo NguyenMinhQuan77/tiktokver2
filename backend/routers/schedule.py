@@ -22,6 +22,7 @@ class ScheduleVideoItem(BaseModel):
     thumbnail: str = ""
     title: str = ""
     show_browser: bool = True  # whether to show Chrome window during upload
+    account_handle: str = ""   # which account to post with (empty = use active)
 
 
 class ScheduleCreateRequest(BaseModel):
@@ -45,6 +46,7 @@ async def create_schedule(req: ScheduleCreateRequest):
             thumbnail=v.thumbnail,
             title=v.title,
             show_browser=v.show_browser,
+            account_handle=v.account_handle,
         )
         # Strip internal-only fields before returning
         created.append({k: val for k, val in item.items() if k not in ("task", "post_at")})

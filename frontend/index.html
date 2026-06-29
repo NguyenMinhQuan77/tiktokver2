@@ -673,6 +673,9 @@ const state = {
   attachMode: {},          // id -> 'shop'|'showcase'|'url'  (which mode active)
   shopProduct: {},         // id -> shop_product dict (from source video anchor)
   delayMinutes: {},        // id -> delay in minutes
+  videoAccount: {},        // id -> account handle to post with
+  accountsList: [],        // [{handle, logged_in}] loaded from /auth/accounts
+  activeHandle: '',        // currently active account handle
   showBrowser: false,      // global: whether to show Chrome window during upload
   products: [],            // [{id, name, price, image}] from TikTok Shop showcase
   productsLoading: false,
@@ -693,6 +696,8 @@ async function loadAccountList() {
   try {
     const res = await fetch('/auth/accounts');
     const data = await res.json();
+    state.accountsList = data.accounts || [];
+    state.activeHandle = data.active_handle || '';
     renderAccountMenu(data.accounts, data.active_handle);
   } catch {}
 }
@@ -1116,12 +1121,27 @@ function buildVideoCard(v, idx) {
           <div class="post-time-hint" id="hint-${v.id}"></div>
         </div>
       </div>
+      <div>
+        <label class="card-input-label">👤 Đăng bằng nick</label>
+        <select
+          class="card-input"
+          id="account-${v.id}"
+          onchange="state.videoAccount['${v.id}']=this.value"
+          onclick="event.stopPropagation()"
+          style="width:100%"
+        >
+          ${state.accountsList.map(a => `<option value="${escHtml(a.handle)}" ${(state.videoAccount[v.id]||state.activeHandle)===a.handle?'selected':''}>${escHtml('@'+a.handle)}${a.logged_in?'':' ⚠️'}</option>`).join('')}
+        </select>
+      </div>
     </div>
   `;
 
   // Initialise state for this card
   if (state.delayMinutes[v.id] === undefined) {
     state.delayMinutes[v.id] = 0;
+  }
+  if (state.videoAccount[v.id] === undefined) {
+    state.videoAccount[v.id] = state.activeHandle;
   }
   if (state.attachMode[v.id] === undefined) {
     state.attachMode[v.id] = 'shop';
@@ -1366,6 +1386,7 @@ async function submitSchedule() {
       thumbnail: v.thumbnail || '',
       title: v.title || '',
       show_browser: state.showBrowser,
+      account_handle: state.videoAccount[id] || state.activeHandle || '',
     });
   }
 
@@ -1472,6 +1493,7 @@ function buildQueueRow(item) {
       ${thumbHtml}
       <div class="queue-info">
         <div class="queue-title">${escHtml(item.title || item.video_url)}</div>
+        ${item.account_handle ? `<div style="font-size:11px;color:#25F4EE;margin-bottom:2px">👤 @${escHtml(item.account_handle)}</div>` : ''}
         ${countdownHtml}
       </div>
       <div class="flex items-center gap-2 flex-shrink-0">
