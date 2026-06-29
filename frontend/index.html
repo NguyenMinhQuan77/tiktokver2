@@ -554,18 +554,29 @@
         <span id="profile-count-text" style="color:#f1f1f1;font-size:14px"></span>
       </div>
 
-      <!-- Row 2: Số video cần lấy + nút lấy -->
-      <div class="flex gap-3">
+      <!-- Row 2: Range picker + nút lấy -->
+      <div class="flex gap-3" style="align-items:center;flex-wrap:wrap">
         <div style="display:flex;align-items:center;gap:8px;flex-shrink:0">
-          <label style="color:#888;font-size:13px;white-space:nowrap">Số video muốn lấy:</label>
+          <label style="color:#888;font-size:13px;white-space:nowrap">Từ video</label>
           <input
-            id="video-count-input"
+            id="video-start-input"
             type="number"
             min="1"
-            max="200"
-            value="10"
+            max="9999"
+            value="1"
             class="input-field"
-            style="width:80px;text-align:center"
+            style="width:70px;text-align:center"
+            onkeydown="if(event.key==='Enter')fetchVideos()"
+          />
+          <label style="color:#888;font-size:13px;white-space:nowrap">đến</label>
+          <input
+            id="video-end-input"
+            type="number"
+            min="1"
+            max="9999"
+            value="20"
+            class="input-field"
+            style="width:70px;text-align:center"
             onkeydown="if(event.key==='Enter')fetchVideos()"
           />
         </div>
@@ -629,7 +640,7 @@
       Đã chọn <span id="selected-count" class="font-bold" style="color:#FE2C55">0</span> video
     </div>
     <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:#ccc;cursor:pointer;user-select:none">
-      <input type="checkbox" id="show-browser-cb" checked onchange="state.showBrowser = this.checked"
+      <input type="checkbox" id="show-browser-cb" onchange="state.showBrowser = this.checked"
         style="width:15px;height:15px;cursor:pointer;accent-color:#FE2C55"/>
       Mở web upload
     </label>
@@ -655,13 +666,14 @@ const state = {
   user: null,
   videos: [],              // [{id, url, title, caption, thumbnail, duration}]
   selected: new Set(),     // set of video ids
+  selectionOrder: [],      // ordered list of selected video ids (for delay assignment)
   affiliateLinks: {},      // id -> affiliate url string (manual URL mode)
   selectedProduct: {},     // id -> product_id string (showcase mode)
   attachLink: {},          // id -> bool: whether to attach product link
   attachMode: {},          // id -> 'shop'|'showcase'|'url'  (which mode active)
   shopProduct: {},         // id -> shop_product dict (from source video anchor)
   delayMinutes: {},        // id -> delay in minutes
-  showBrowser: true,       // global: whether to show Chrome window during upload
+  showBrowser: false,      // global: whether to show Chrome window during upload
   products: [],            // [{id, name, price, image}] from TikTok Shop showcase
   productsLoading: false,
   queueInterval: null,
@@ -901,10 +913,11 @@ async function checkProfileCount() {
     const countText = document.getElementById('profile-count-text');
     banner.style.display = 'flex';
     if (total > 0) {
-      countText.innerHTML = `Profile này có tổng <strong style="color:#25F4EE">${total}</strong> video — nhập số video muốn lấy (tối đa ${total})`;
-      document.getElementById('video-count-input').max = total;
+      countText.innerHTML = `Profile này có tổng <strong style="color:#25F4EE">${total}</strong> video — chọn khoảng video muốn lấy (1 đến ${total})`;
+      document.getElementById('video-end-input').max = total;
+      document.getElementById('video-start-input').max = total;
     } else {
-      countText.textContent = 'Không đọc được tổng số video — nhập số bạn muốn lấy';
+      countText.textContent = 'Không đọc được tổng số video — nhập khoảng video muốn lấy';
     }
   } catch (e) {
     showToast(e.message, 'error');
@@ -919,7 +932,9 @@ async function fetchVideos() {
   const url = document.getElementById('profile-url').value.trim();
   if (!url) { showToast('Vui lòng nhập link profile TikTok', 'error'); return; }
 
-  const maxCount = parseInt(document.getElementById('video-count-input').value) || 10;
+  const startIndex = parseInt(document.getElementById('video-start-input').value) || 1;
+  const endIndex   = parseInt(document.getElementById('video-end-input').value) || 20;
+  const maxCount   = Math.max(1, endIndex - startIndex + 1);
 
   const btn = document.getElementById('fetch-btn');
   const btnText = document.getElementById('fetch-btn-text');
@@ -932,13 +947,14 @@ async function fetchVideos() {
     const res = await fetch('/profile/videos', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url, max_count: maxCount }),
+      body: JSON.stringify({ url, max_count: maxCount, start_index: startIndex }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail || 'Lỗi lấy video');
 
     state.videos = data.videos || [];
     state.selected.clear();
+    state.selectionOrder = [];
     state.affiliateLinks = {};
     state.attachLink = {};
     state.delayMinutes = {};
@@ -947,18 +963,17 @@ async function fetchVideos() {
     document.getElementById('video-grid-section').style.display = 'block';
 
     const totalCount = data.total_count || 0;
-    let countLabel = `Đang hiển thị ${state.videos.length} video`;
-    if (totalCount > 0) {
-      countLabel += ` / tổng ${totalCount} video`;
-    }
+    const actualEnd = startIndex + state.videos.length - 1;
+    let countLabel = `Hiển thị video ${startIndex}–${actualEnd}`;
+    if (totalCount > 0) countLabel += ` / tổng ${totalCount} video`;
     document.getElementById('video-count-label').textContent = countLabel;
     // Update banner if total was fetched from server
     if (totalCount > 0) {
       const banner = document.getElementById('profile-count-banner');
       const countText = document.getElementById('profile-count-text');
       banner.style.display = 'flex';
-      countText.innerHTML = `Profile này có tổng <strong style="color:#25F4EE">${totalCount}</strong> video — đang hiển thị <strong>${state.videos.length}</strong> video`;
-      document.getElementById('video-count-input').max = totalCount;
+      countText.innerHTML = `Profile này có tổng <strong style="color:#25F4EE">${totalCount}</strong> video — đang hiển thị video <strong>${startIndex}–${actualEnd}</strong>`;
+      document.getElementById('video-end-input').max = totalCount;
     }
 
     updateActionBar();
@@ -1106,10 +1121,9 @@ function buildVideoCard(v, idx) {
 
   // Initialise state for this card
   if (state.delayMinutes[v.id] === undefined) {
-    state.delayMinutes[v.id] = idx * 30;
+    state.delayMinutes[v.id] = 0;
   }
   if (state.attachMode[v.id] === undefined) {
-    // Default to SP gốc mode always — user can switch to showcase/none
     state.attachMode[v.id] = 'shop';
     state.attachLink[v.id] = true;
   }
@@ -1159,10 +1173,22 @@ function setAttachLink(id, attach, e) {
 function toggleCard(id, idx) {
   if (state.selected.has(id)) {
     state.selected.delete(id);
+    state.selectionOrder = state.selectionOrder.filter(x => x !== id);
     document.getElementById(`card-${id}`).classList.remove('selected');
     document.getElementById(`inputs-${id}`).style.display = 'none';
+    // Reassign delays for remaining selections (0, 30, 60...)
+    state.selectionOrder.forEach((sid, i) => {
+      state.delayMinutes[sid] = i * 30;
+      const el = document.getElementById(`delay-${sid}`);
+      if (el) el.value = i * 30;
+      updatePostTimeHint(sid);
+    });
   } else {
     state.selected.add(id);
+    state.selectionOrder.push(id);
+    // Assign delay based on selection order
+    const selIdx = state.selectionOrder.length - 1;
+    state.delayMinutes[id] = selIdx * 30;
     document.getElementById(`card-${id}`).classList.add('selected');
     document.getElementById(`inputs-${id}`).style.display = 'flex';
     setAttachMode(id, state.attachMode[id] || 'showcase', null);
@@ -1178,6 +1204,7 @@ function clearSelection() {
     if (inp) inp.style.display = 'none';
   });
   state.selected.clear();
+  state.selectionOrder = [];
   updateActionBar();
 }
 
@@ -1287,7 +1314,7 @@ function updateActionBar() {
   const anyMissing = [...state.selected].some(id => {
     const mode = state.attachMode[id] || 'showcase';
     if (mode === 'none') return false;
-    if (mode === 'shop') return !(state.shopProduct[id] && state.shopProduct[id].name);
+    if (mode === 'shop') return false; // backend tự bỏ qua nếu không có product ID
     // showcase
     const hasProduct = !!(state.selectedProduct[id] || '').trim();
     const hasUrl = !!(state.affiliateLinks[id] || '').trim();

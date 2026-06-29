@@ -596,41 +596,38 @@ async def _search_and_select_myshop(page, sp_id: str, sp_name: str):
 
     async def _click_search_icon() -> bool:
         """Click the magnifying glass search button inside the dialog."""
-        # Try clicking the search icon/button next to the input
-        for _sel in [
-            '[role="dialog"] button[type="submit"]',
-            '[role="dialog"] button:has(svg)',
-            '[role="dialog"] [class*="search"] button',
-            '[role="dialog"] [class*="Search"] button',
-        ]:
-            try:
-                _btn = page.locator(_sel).first
-                if await _btn.count() > 0 and await _btn.is_visible():
-                    await _btn.click(force=True)
-                    logger.info(f"Clicked search icon via: {_sel}")
-                    return True
-            except Exception:
-                pass
-        # JS fallback: find SVG button sibling of the input
-        clicked = await page.evaluate("""() => {
+        # Find the icon by locating elements near the search input (not the back-arrow or Cancel/Next)
+        coords = await page.evaluate("""() => {
             const dialogs = Array.from(document.querySelectorAll('[role="dialog"], [aria-modal="true"]'))
                 .filter(el => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; });
             const container = dialogs.length ? dialogs[dialogs.length - 1] : document.body;
             const inp = container.querySelector('input');
-            if (!inp) return false;
-            // Look for a button/svg near the input (parent or sibling)
-            const parent = inp.parentElement;
-            const btn = parent && (
-                parent.querySelector('button') ||
-                parent.querySelector('[role="button"]') ||
-                parent.querySelector('svg')
-            );
-            if (btn) { btn.dispatchEvent(new MouseEvent('click', {bubbles: true})); return true; }
-            return false;
+            if (!inp) return null;
+            const ir = inp.getBoundingClientRect();
+
+            // Walk up to parent and grandparent to find button/svg adjacent to input
+            for (const wrapper of [inp.parentElement, inp.parentElement && inp.parentElement.parentElement]) {
+                if (!wrapper) continue;
+                const candidates = Array.from(wrapper.querySelectorAll('button, [role="button"], svg'));
+                for (const el of candidates) {
+                    const r = el.getBoundingClientRect();
+                    if (r.width === 0 || r.height === 0) continue;
+                    // Must be vertically aligned with the input
+                    if (Math.abs((r.top + r.height/2) - (ir.top + ir.height/2)) > 30) continue;
+                    // Must be to the right of the input center (i.e. is the icon on the right)
+                    if (r.left + r.width/2 < ir.left + ir.width/2) continue;
+                    return {x: r.left + r.width/2, y: r.top + r.height/2, method: 'adjacent'};
+                }
+            }
+
+            // Fallback: click just outside the right edge of the input
+            return {x: ir.right + 10, y: ir.top + ir.height/2, method: 'right-of-input'};
         }""")
-        if clicked:
-            logger.info("Clicked search icon via JS fallback")
-        return clicked
+        if coords:
+            await page.mouse.click(coords['x'], coords['y'])
+            logger.info(f"Clicked search icon at ({coords['x']:.0f},{coords['y']:.0f}) [{coords.get('method')}]")
+            return True
+        return False
 
     async def _type_in_search(term: str) -> bool:
         """Fill search input, dispatch events, click search icon, then press Enter."""
@@ -651,12 +648,13 @@ async def _search_and_select_myshop(page, sp_id: str, sp_name: str):
                     await _inp.fill(term)
                     await _inp.dispatch_event("input")
                     await _inp.dispatch_event("change")
-                    await asyncio.sleep(0.2)
-                    # Click magnifying glass icon first (TikTok requires this)
+                    await asyncio.sleep(0.3)
+                    # Press Enter directly on the input (guarantees focus stays on it)
+                    await _inp.press("Enter")
+                    await asyncio.sleep(0.5)
+                    # Also click the magnifying glass icon as backup
                     await _click_search_icon()
-                    await asyncio.sleep(0.2)
-                    await page.keyboard.press("Enter")
-                    await asyncio.sleep(0.2)
+                    await asyncio.sleep(0.3)
                     return True
             except Exception:
                 pass
@@ -682,11 +680,11 @@ async def _search_and_select_myshop(page, sp_id: str, sp_name: str):
                 await page.keyboard.press("Delete")
                 await asyncio.sleep(0.1)
                 await page.keyboard.type(term, delay=30)
-                await asyncio.sleep(0.2)
-                await _click_search_icon()
-                await asyncio.sleep(0.2)
+                await asyncio.sleep(0.3)
                 await page.keyboard.press("Enter")
-                await asyncio.sleep(0.2)
+                await asyncio.sleep(0.5)
+                await _click_search_icon()
+                await asyncio.sleep(0.3)
                 return True
         except Exception:
             pass
@@ -702,18 +700,59 @@ async def _search_and_select_myshop(page, sp_id: str, sp_name: str):
         await _cancel_dialog()
         return False
 
-    async def _search_and_find_rows(wait_secs: float = 2.5) -> int:
-        """Type sp_id in search box, wait, return index of matching row or -1."""
-        typed = await _type_in_search(sp_id)
-        if typed:
-            logger.info(f"Typed product ID '{sp_id}' in search box")
-        else:
-            logger.warning("Could not find search input — search skipped")
+    async def _fill_search_input(term: str) -> bool:
+        """Fill search input WITHOUT triggering search (no icon click, no Enter)."""
+        for _sel in [
+            '[role="dialog"] input:visible',
+            '[aria-modal="true"] input:visible',
+            'input[placeholder*="search" i]:visible',
+            'input[placeholder*="tìm" i]:visible',
+        ]:
+            try:
+                _inp = page.locator(_sel).first
+                if await _inp.count() > 0:
+                    await _inp.click()
+                    await asyncio.sleep(0.2)
+                    await _inp.fill("")
+                    await asyncio.sleep(0.1)
+                    await _inp.fill(term)
+                    await _inp.dispatch_event("input")
+                    await _inp.dispatch_event("change")
+                    return True
+            except Exception:
+                pass
+        return False
+
+    async def _check_current_rows() -> int:
+        """Check currently visible rows for sp_id — no search triggered."""
+        rows = page.locator("table tbody tr")
+        cnt = await rows.count()
+        for _i in range(min(cnt, 20)):
+            try:
+                _rt = await rows.nth(_i).inner_text()
+                if sp_id in _rt:
+                    logger.info(f"  → ID match on current page at row {_i}: {_rt[:80]}")
+                    return _i
+            except Exception:
+                pass
+        return -1
+
+    async def _trigger_search_and_find_rows(wait_secs: float = 3.0) -> int:
+        """Click magnifying glass + Enter to trigger search, wait, return matching row index."""
+        await _click_search_icon()
+        await asyncio.sleep(0.3)
+        # Also press Enter in case icon click didn't trigger
+        try:
+            _inp = page.locator('[role="dialog"] input:visible').first
+            if await _inp.count() > 0:
+                await _inp.press("Enter")
+        except Exception:
+            pass
         await asyncio.sleep(wait_secs)
         await page.screenshot(path=os.path.join(_TEMP_DIR, "debug_showcase_search.png"))
         rows = page.locator("table tbody tr")
         cnt = await rows.count()
-        logger.info(f"Showcase rows after ID search: {cnt}")
+        logger.info(f"Showcase rows after search: {cnt}")
         for _i in range(min(cnt, 20)):
             try:
                 _rt = await rows.nth(_i).inner_text()
@@ -724,6 +763,27 @@ async def _search_and_select_myshop(page, sp_id: str, sp_name: str):
             except Exception:
                 pass
         return -1
+
+    async def _search_and_find_rows(wait_secs: float = 3.0) -> int:
+        """
+        Two-phase search:
+        1. Fill input + check page 1 immediately (newly added products appear here).
+        2. If not found → click magnifying glass to search all pages.
+        """
+        filled = await _fill_search_input(sp_id)
+        if filled:
+            logger.info(f"Filled search box with '{sp_id}' — checking page 1 first")
+            await asyncio.sleep(0.5)
+            page1_idx = await _check_current_rows()
+            if page1_idx >= 0:
+                logger.info(f"Found product on page 1 without search at row {page1_idx}")
+                return page1_idx
+        else:
+            logger.warning("Could not fill search input")
+
+        # Page 1 didn't have it → trigger search via magnifying glass
+        logger.info("Not found on page 1 — triggering search via magnifying glass")
+        return await _trigger_search_and_find_rows(wait_secs=wait_secs)
 
     # --- Step 5: Search and select ---
     found_idx = await _search_and_find_rows(wait_secs=3.0)
@@ -1697,6 +1757,42 @@ async def post_video(video_path: str, caption: str, product_url: str = "", produ
         )
         await context.add_cookies(cookies)
         page = await context.new_page()
+
+        # On macOS, --window-position CLI flags are ignored for real Chrome.
+        # Use CDP to move the upload window far off-screen so it's invisible.
+        # Then restore focus to the user's Chrome (localhost:8000) via AppleScript.
+        if not show_browser:
+            try:
+                _cdp = await page.context.new_cdp_session(page)
+                _win = await _cdp.send("Browser.getWindowForTarget")
+                if _win.get("windowId"):
+                    await _cdp.send("Browser.setWindowBounds", {
+                        "windowId": _win["windowId"],
+                        "bounds": {"left": -32000, "top": -32000, "width": 1440, "height": 900},
+                    })
+                await _cdp.detach()
+            except Exception:
+                pass
+            # Bring the user's Chrome (with localhost:8000) back to foreground
+            import subprocess
+            try:
+                subprocess.Popen(["osascript", "-e", """
+                    tell application "Google Chrome"
+                        repeat with w in windows
+                            repeat with t in tabs of w
+                                if URL of t contains "localhost" then
+                                    set active tab index of w to tab index of t
+                                    set index of w to 1
+                                    activate
+                                    return
+                                end if
+                            end repeat
+                        end repeat
+                        activate
+                    end tell
+                """])
+            except Exception:
+                pass
 
         logger.info("Navigating to TikTok Studio upload...")
         await page.goto(UPLOAD_URL, wait_until="domcontentloaded")
