@@ -594,9 +594,31 @@ async def _search_and_select_myshop(page, sp_id: str, sp_name: str):
             except Exception:
                 pass
 
-    async def _type_in_search(term: str):
-        """Find the search input in the dialog and type term."""
-        coords = None
+    async def _type_in_search(term: str) -> bool:
+        """Clear the search input in the dialog and type term, then trigger input event."""
+        # 1. Try Playwright locator first (most reliable)
+        for _sel in [
+            '[role="dialog"] input:visible',
+            '[aria-modal="true"] input:visible',
+            'input[placeholder*="search" i]:visible',
+            'input[placeholder*="tìm" i]:visible',
+        ]:
+            try:
+                _inp = page.locator(_sel).first
+                if await _inp.count() > 0:
+                    await _inp.click()
+                    await asyncio.sleep(0.2)
+                    await _inp.fill("")
+                    await asyncio.sleep(0.1)
+                    await _inp.fill(term)
+                    # Dispatch input event so TikTok's React state picks up the change
+                    await _inp.dispatch_event("input")
+                    await asyncio.sleep(0.2)
+                    return True
+            except Exception:
+                pass
+
+        # 2. Fallback: coordinate-based click then keyboard type (no Enter key)
         try:
             coords = await page.evaluate("""() => {
                 const dialogs = Array.from(document.querySelectorAll('[role="dialog"], [aria-modal="true"]'))
@@ -610,16 +632,17 @@ async def _search_and_select_myshop(page, sp_id: str, sp_name: str):
                 const r = inputs[0].getBoundingClientRect();
                 return {x: r.x + r.width / 2, y: r.y + r.height / 2};
             }""")
+            if coords:
+                await page.mouse.click(coords['x'], coords['y'])
+                await asyncio.sleep(0.3)
+                await page.keyboard.press("Control+a")
+                await page.keyboard.press("Delete")
+                await asyncio.sleep(0.1)
+                await page.keyboard.type(term, delay=30)
+                await asyncio.sleep(0.2)
+                return True
         except Exception:
             pass
-        if coords:
-            await page.mouse.click(coords['x'], coords['y'])
-            await asyncio.sleep(0.3)
-            await page.keyboard.press("Control+a")
-            await page.keyboard.type(term, delay=40)
-            await asyncio.sleep(0.5)
-            await page.keyboard.press("Enter")
-            return True
         return False
 
     # --- Step 4: Search by product ID only — never by name ---
@@ -658,21 +681,36 @@ async def _search_and_select_myshop(page, sp_id: str, sp_name: str):
     # --- Step 5: Search and select ---
     found_idx = await _search_and_find_rows(wait_secs=3.0)
 
-    # If 0 results and product was just added, re-click tab and retry up to 4 times.
-    # TikTok can take 10-20s to index a newly added product in the dialog search.
+    # If not found: retry up to 6 times.
+    # - Odd retries: just wait 5s and retype (faster, avoids tab reload overhead)
+    # - Even retries: re-click tab to force list refresh, then wait 7s
+    # TikTok can take 10–50s to index a newly-added product into the dialog search.
     if found_idx < 0 and in_showcase:
-        for _retry in range(4):
-            logger.info(f"0 rows after add — retry {_retry+1}/4: re-clicking Showcase tab, waiting 6s")
+        async def _retype_without_tab_click(wait_before: float) -> int:
+            await asyncio.sleep(wait_before)
+            return await _search_and_find_rows(wait_secs=3.0)
+
+        async def _retype_with_tab_click(wait_after_click: float) -> int:
             for tab_sel in ['text="Showcase products"', ':text("Showcase products")', ':text("Sản phẩm giới thiệu")']:
                 try:
                     _t = page.locator(tab_sel).first
                     if await _t.count() > 0 and await _t.is_visible():
                         await _t.click()
-                        await asyncio.sleep(6)
+                        await asyncio.sleep(wait_after_click)
                         break
                 except Exception:
                     pass
-            found_idx = await _search_and_find_rows(wait_secs=3.0)
+            return await _search_and_find_rows(wait_secs=3.0)
+
+        for _retry in range(6):
+            if _retry % 2 == 0:
+                # Even: re-click tab (refresh list) + longer wait
+                logger.info(f"Search retry {_retry+1}/6: re-clicking Showcase tab, waiting 7s")
+                found_idx = await _retype_with_tab_click(wait_after_click=7)
+            else:
+                # Odd: just retype (no tab click) — avoids list reload delay
+                logger.info(f"Search retry {_retry+1}/6: retype only, waiting 5s")
+                found_idx = await _retype_without_tab_click(wait_before=5)
             if found_idx >= 0:
                 break
 
