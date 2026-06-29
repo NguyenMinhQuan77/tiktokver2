@@ -594,8 +594,46 @@ async def _search_and_select_myshop(page, sp_id: str, sp_name: str):
             except Exception:
                 pass
 
+    async def _click_search_icon() -> bool:
+        """Click the magnifying glass search button inside the dialog."""
+        # Try clicking the search icon/button next to the input
+        for _sel in [
+            '[role="dialog"] button[type="submit"]',
+            '[role="dialog"] button:has(svg)',
+            '[role="dialog"] [class*="search"] button',
+            '[role="dialog"] [class*="Search"] button',
+        ]:
+            try:
+                _btn = page.locator(_sel).first
+                if await _btn.count() > 0 and await _btn.is_visible():
+                    await _btn.click(force=True)
+                    logger.info(f"Clicked search icon via: {_sel}")
+                    return True
+            except Exception:
+                pass
+        # JS fallback: find SVG button sibling of the input
+        clicked = await page.evaluate("""() => {
+            const dialogs = Array.from(document.querySelectorAll('[role="dialog"], [aria-modal="true"]'))
+                .filter(el => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; });
+            const container = dialogs.length ? dialogs[dialogs.length - 1] : document.body;
+            const inp = container.querySelector('input');
+            if (!inp) return false;
+            // Look for a button/svg near the input (parent or sibling)
+            const parent = inp.parentElement;
+            const btn = parent && (
+                parent.querySelector('button') ||
+                parent.querySelector('[role="button"]') ||
+                parent.querySelector('svg')
+            );
+            if (btn) { btn.dispatchEvent(new MouseEvent('click', {bubbles: true})); return true; }
+            return false;
+        }""")
+        if clicked:
+            logger.info("Clicked search icon via JS fallback")
+        return clicked
+
     async def _type_in_search(term: str) -> bool:
-        """Clear the search input in the dialog and type term, then trigger input event."""
+        """Fill search input, dispatch events, click search icon, then press Enter."""
         # 1. Try Playwright locator first (most reliable)
         for _sel in [
             '[role="dialog"] input:visible',
@@ -611,14 +649,19 @@ async def _search_and_select_myshop(page, sp_id: str, sp_name: str):
                     await _inp.fill("")
                     await asyncio.sleep(0.1)
                     await _inp.fill(term)
-                    # Dispatch input event so TikTok's React state picks up the change
                     await _inp.dispatch_event("input")
+                    await _inp.dispatch_event("change")
+                    await asyncio.sleep(0.2)
+                    # Click magnifying glass icon first (TikTok requires this)
+                    await _click_search_icon()
+                    await asyncio.sleep(0.2)
+                    await page.keyboard.press("Enter")
                     await asyncio.sleep(0.2)
                     return True
             except Exception:
                 pass
 
-        # 2. Fallback: coordinate-based click then keyboard type (no Enter key)
+        # 2. Fallback: coordinate-based click then keyboard type
         try:
             coords = await page.evaluate("""() => {
                 const dialogs = Array.from(document.querySelectorAll('[role="dialog"], [aria-modal="true"]'))
@@ -639,6 +682,10 @@ async def _search_and_select_myshop(page, sp_id: str, sp_name: str):
                 await page.keyboard.press("Delete")
                 await asyncio.sleep(0.1)
                 await page.keyboard.type(term, delay=30)
+                await asyncio.sleep(0.2)
+                await _click_search_icon()
+                await asyncio.sleep(0.2)
+                await page.keyboard.press("Enter")
                 await asyncio.sleep(0.2)
                 return True
         except Exception:
@@ -718,6 +765,60 @@ async def _search_and_select_myshop(page, sp_id: str, sp_name: str):
         page.remove_listener("request", _capture_api)
     except Exception:
         pass
+
+    # Fallback: clear search → browse ALL showcase rows to find by ID
+    if found_idx < 0 and in_showcase:
+        logger.info("Search returned 0 results — clearing search to browse all showcase products")
+        for _tab_sel in ['text="Showcase products"', ':text("Showcase products")', ':text("Sản phẩm giới thiệu")']:
+            try:
+                _t = page.locator(_tab_sel).first
+                if await _t.count() > 0 and await _t.is_visible():
+                    await _t.click()
+                    await asyncio.sleep(3)
+                    break
+            except Exception:
+                pass
+        # Clear search box so all products load
+        for _sel in ['[role="dialog"] input:visible', '[aria-modal="true"] input:visible', 'input[placeholder*="search" i]:visible']:
+            try:
+                _inp = page.locator(_sel).first
+                if await _inp.count() > 0:
+                    await _inp.click()
+                    await _inp.fill("")
+                    await _inp.dispatch_event("input")
+                    await page.keyboard.press("Enter")
+                    await asyncio.sleep(2)
+                    break
+            except Exception:
+                pass
+        # Scroll through ALL rows to find sp_id
+        for _scroll_attempt in range(10):
+            rows = page.locator("table tbody tr")
+            cnt = await rows.count()
+            logger.info(f"Browse all rows attempt {_scroll_attempt}: {cnt} rows")
+            for _i in range(cnt):
+                try:
+                    _rt = await rows.nth(_i).inner_text()
+                    if sp_id in _rt:
+                        logger.info(f"Found product ID in unfiltered row {_i}")
+                        found_idx = _i
+                        break
+                except Exception:
+                    pass
+            if found_idx >= 0:
+                break
+            # Scroll down inside dialog to load more rows
+            try:
+                await page.evaluate("""() => {
+                    const tbodies = document.querySelectorAll('table tbody');
+                    if (tbodies.length) {
+                        const el = tbodies[tbodies.length-1];
+                        el.scrollTop += 400;
+                    }
+                }""")
+                await asyncio.sleep(1.5)
+            except Exception:
+                break
 
     if found_idx < 0:
         logger.warning(f"Product ID {sp_id} not found in search results after retry — cancelling dialog")
@@ -1562,7 +1663,7 @@ async def _confirm_product_dialog(page):
                 pass
 
 
-async def post_video(video_path: str, caption: str, product_url: str = "", product_id: str = "", shop_product: dict = {}) -> dict:
+async def post_video(video_path: str, caption: str, product_url: str = "", product_id: str = "", shop_product: dict = {}, show_browser: bool = True) -> dict:
     """
     Post video to TikTok via TikTok Studio upload page.
     Optionally attach a TikTok Shop product link.
@@ -1574,15 +1675,21 @@ async def post_video(video_path: str, caption: str, product_url: str = "", produ
 
     username = _get_username_from_cookies(cookies)
 
+    # When show_browser=False, push window far off-screen instead of headless
+    # (headless mode may be detected by TikTok; off-screen keeps full codec support)
+    chrome_args = [
+        "--disable-blink-features=AutomationControlled",
+        "--no-sandbox",
+        "--autoplay-policy=no-user-gesture-required",
+    ]
+    if not show_browser:
+        chrome_args += ["--window-position=-32000,-32000", "--window-size=1440,900"]
+
     async with async_playwright() as p:
         browser = await p.chromium.launch(
             headless=False,
             channel="chrome",  # dùng Chrome thật thay vì Chromium bundled → có đầy đủ codec video
-            args=[
-                "--disable-blink-features=AutomationControlled",
-                "--no-sandbox",
-                "--autoplay-policy=no-user-gesture-required",
-            ],
+            args=chrome_args,
         )
         context = await browser.new_context(
             viewport={"width": 1440, "height": 900},
@@ -2013,7 +2120,11 @@ async def post_video(video_path: str, caption: str, product_url: str = "", produ
                         await asyncio.sleep(3)
                         break
             except Exception as e:
+                err_msg = str(e)
                 logger.warning(f"Success check iter {_si}: {e}")
+                if "browser has been closed" in err_msg or "Target page" in err_msg or "context or browser" in err_msg:
+                    logger.info("Browser closed — treating as post success")
+                    break
 
         # Screenshot for debugging
         try:

@@ -21,9 +21,9 @@ logger = logging.getLogger("test_xiang_full")
 from backend.services import profile_service
 from backend.services.tiktok_browser import post_video
 
-PROFILE_URL = "https://www.tiktok.com/@_xiangg__"
-MAX_VIDEOS = 10
-TARGET_INDEX = 9  # 1-based: post the 9th video
+PROFILE_URL = "https://www.tiktok.com/@huyducaffhihi"
+MAX_VIDEOS = 20
+TARGET_INDEX = 14  # 1-based: post the 14th video
 
 
 async def main():

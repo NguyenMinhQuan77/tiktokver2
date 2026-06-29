@@ -61,7 +61,19 @@
       "Bash(kill %2)",
       "Bash(kill 1052102)",
       "Bash(tee /tmp/test_leminh_39.log)",
-      "Bash(tee /tmp/test_scroll_fix.log)"
+      "Bash(tee /tmp/test_scroll_fix.log)",
+      "Skill(run)",
+      "Bash(./run.sh)",
+      "Bash(pip3 install *)",
+      "Bash(/Users/quan.nm2/Library/Python/3.9/bin/uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000)",
+      "Read(//tmp/**)",
+      "Bash(curl -s http://localhost:8000/auth/accounts)",
+      "Bash(python3 -m json.tool)",
+      "Read(//private/tmp/**)",
+      "Bash(curl -s -X POST http://localhost:8000/profile/videos -H 'Content-Type: application/json' -d '{\"url\": \"https://www.tiktok.com/@_xiangg__\"}')",
+      "Bash(python3 -c ' *)",
+      "Bash(curl -s -X POST http://localhost:8000/auth/switch -H 'Content-Type: application/json' -d '{\"handle\": \"n.shop.123\"}')",
+      "Bash(curl -s -X POST http://localhost:8000/schedule/create -H 'Content-Type: application/json' -d '{ *)"
     ]
   }
 }

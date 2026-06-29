@@ -628,6 +628,11 @@
     <div class="text-sm text-gray-400">
       Đã chọn <span id="selected-count" class="font-bold" style="color:#FE2C55">0</span> video
     </div>
+    <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:#ccc;cursor:pointer;user-select:none">
+      <input type="checkbox" id="show-browser-cb" checked onchange="state.showBrowser = this.checked"
+        style="width:15px;height:15px;cursor:pointer;accent-color:#FE2C55"/>
+      Mở web upload
+    </label>
     <button id="schedule-btn" class="btn-primary" onclick="submitSchedule()">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
         <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
@@ -656,6 +661,7 @@ const state = {
   attachMode: {},          // id -> 'shop'|'showcase'|'url'  (which mode active)
   shopProduct: {},         // id -> shop_product dict (from source video anchor)
   delayMinutes: {},        // id -> delay in minutes
+  showBrowser: true,       // global: whether to show Chrome window during upload
   products: [],            // [{id, name, price, image}] from TikTok Shop showcase
   productsLoading: false,
   queueInterval: null,
@@ -1332,6 +1338,7 @@ async function submitSchedule() {
       delay_minutes: state.delayMinutes[id] ?? 0,
       thumbnail: v.thumbnail || '',
       title: v.title || '',
+      show_browser: state.showBrowser,
     });
   }
 

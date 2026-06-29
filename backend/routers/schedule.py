@@ -21,6 +21,7 @@ class ScheduleVideoItem(BaseModel):
     delay_minutes: int
     thumbnail: str = ""
     title: str = ""
+    show_browser: bool = True  # whether to show Chrome window during upload
 
 
 class ScheduleCreateRequest(BaseModel):
@@ -43,6 +44,7 @@ async def create_schedule(req: ScheduleCreateRequest):
             delay_minutes=v.delay_minutes,
             thumbnail=v.thumbnail,
             title=v.title,
+            show_browser=v.show_browser,
         )
         # Strip internal-only fields before returning
         created.append({k: val for k, val in item.items() if k not in ("task", "post_at")})
